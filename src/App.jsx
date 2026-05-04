@@ -1801,6 +1801,7 @@ export default function App(){
   const[observacoes,setObservacoes]=useState({});
   const[tickets,setTickets]=useState([]);
   const[loadingData,setLoadingData]=useState(false);
+  const[loadingAuth,setLoadingAuth]=useState(true); // aguarda verificar sessão
 
   // Restore session on load
   useEffect(()=>{
@@ -1809,9 +1810,13 @@ export default function App(){
         const{data:perfil}=await supabase.from("perfis").select("*").eq("id",session.user.id).single();
         if(perfil)setUser({...session.user,...perfil});
       }
+      setLoadingAuth(false); // sessão verificada
     });
-    const{data:{subscription}}=supabase.auth.onAuthStateChange((_,session)=>{
-      if(!session){setUser(null);setClientes([]);setCompras([]);setConsultores([]);}
+    const{data:{subscription}}=supabase.auth.onAuthStateChange(async(event,session)=>{
+      if(!session){
+        setUser(null);setClientes([]);setCompras([]);setConsultores([]);
+        setLoadingAuth(false);
+      }
     });
     return()=>subscription.unsubscribe();
   },[]);
@@ -1843,6 +1848,7 @@ export default function App(){
 
   useEffect(()=>{loadData();},[loadData]);
 
+  if(loadingAuth)return<Spinner/>; // aguarda verificar sessão antes de mostrar login
   if(!user)return<Login onLogin={setUser}/>;
   if(loadingData)return<Spinner/>;
 
