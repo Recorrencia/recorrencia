@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
+import { supabase } from "./lib/supabase.js";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend, ReferenceLine } from "recharts";
 
 const C = {
@@ -29,11 +30,11 @@ const CONSULTORES_SEED=[
   {id:4,nome:"Alef",setor:"Farm"},
   {id:5,nome:"Giovanna",setor:"Farm"},
   {id:6,nome:"Sangela",setor:"Farm"},
-  {id:7,nome:"Jandreson",setor:"Farm"},
-  {id:8,nome:"Thayrlla",setor:"Farm"},
+  {id:7,nome:"Aline",setor:"Farm"},
+  {id:8,nome:"Rellen",setor:"Farm"},
   {id:9,nome:"Thays",setor:"Farm"},
-  {id:10,nome:"Rellen",setor:"1ª Compra"},
-  {id:11,nome:"Aline",setor:"1ª Compra"},
+  {id:10,nome:"Thaylla",setor:"1ª Compra"},
+  {id:11,nome:"Jandreson",setor:"1ª Compra"},
 ];
 
 const CLIENTES_SEED=[
@@ -156,13 +157,8 @@ const Login=({onLogin})=>{
           <Field label="Senha">
             <input style={gs.input} value={pass} onChange={e=>setPass(e.target.value)} placeholder="••••••••" type="password" onKeyDown={e=>e.key==="Enter"&&handle()}/>
           </Field>
-          <button style={{...gs.btn(),width:"100%",marginTop:8,padding:"11px 18px"}} onClick={handle}>Entrar</button>
-          <div style={{marginTop:20,padding:14,background:C.panel2,borderRadius:8,fontSize:11,color:C.gray}}>
-            <div style={{marginBottom:6,color:C.lgray,fontWeight:700}}>Credenciais de demo:</div>
-            <div style={{marginBottom:3}}>gestor@recorrencia.com / gestor123</div>
-            <div style={{marginBottom:3}}>assistente@recorrencia.com / assist123</div>
-            <div>dono@recorrencia.com / dono123</div>
-          </div>
+          <button style={{...gs.btn(),width:"100%",marginTop:8,padding:"11px 18px",opacity:loading?0.6:1}} onClick={handle} disabled={loading}>{loading?"Entrando...":"Entrar"}</button>
+
         </div>
       </div>
     </div>
@@ -549,25 +545,45 @@ const Clientes=({clientes,setClientes,consultores,compras,setCompras,user,observ
     return true;
   });
 
-  const addCliente=()=>{
+  const addCliente=async()=>{
     if(!ncNome)return;
     const setor=consultores.find(c=>c.id===Number(ncConsultor))?.setor||"1ª Compra";
-    const novo={id:Date.now(),nome:ncNome,consultor_id:Number(ncConsultor),setor,ciclo_dias:ncCiclo,ultima_compra:ncValor?today():null};
+    const{data:novo,error}=await supabase.from("clientes").insert({
+      nome:ncNome,consultor_id:Number(ncConsultor),setor,ciclo_dias:ncCiclo,
+      ultima_compra:ncValor?today():null
+    }).select().single();
+    if(error){alert("Erro ao cadastrar cliente: "+error.message);return;}
     setClientes(p=>[...p,novo]);
-    if(ncValor)setCompras(p=>[...p,{id:Date.now()+1,cliente_id:novo.id,data:today(),valor:Number(ncValor)}]);
+    if(ncValor){
+      const{data:cp}=await supabase.from("compras").insert({
+        cliente_id:novo.id,data:today(),valor:Number(ncValor)
+      }).select().single();
+      if(cp)setCompras(p=>[...p,cp]);
+    }
     setModalNovoCliente(false);setNcNome("");setNcValor("");
   };
 
-  const addCompra=()=>{
+  const addCompra=async()=>{
     if(!cValor||!modalCompra)return;
-    setCompras(p=>[...p,{id:Date.now(),cliente_id:modalCompra.id,data:cData,valor:Number(cValor)}]);
+    const{data:cp,error}=await supabase.from("compras").insert({
+      cliente_id:modalCompra.id,data:cData,valor:Number(cValor)
+    }).select().single();
+    if(error){alert("Erro ao registrar compra: "+error.message);return;}
+    setCompras(p=>[...p,cp]);
     setClientes(p=>p.map(c=>c.id===modalCompra.id?{...c,ultima_compra:cData}:c));
     setModalCompra(null);setCValor("");
   };
 
-  const transferir=()=>{
+  const transferir=async()=>{
     if(!tConsultor||!modalTransf)return;
-    setClientes(p=>p.map(c=>c.id===modalTransf.id?{...c,consultor_id:Number(tConsultor),setor:tSetor}:c));
+    await supabase.from("transferencias").insert({
+      cliente_id:modalTransf.id,consultor_origem_id:modalTransf.consultor_id,
+      consultor_destino_id:Number(tConsultor),setor_origem:modalTransf.setor,setor_destino:tSetor
+    });
+    const{data}=await supabase.from("clientes").update({
+      consultor_id:Number(tConsultor),setor:tSetor
+    }).eq("id",modalTransf.id).select().single();
+    if(data)setClientes(p=>p.map(c=>c.id===modalTransf.id?data:c));
     setModalTransf(null);
   };
 
@@ -1769,21 +1785,71 @@ const Tickets=({tickets,setTickets,clientes,compras,setCompras,setClientes,user,
 // ══════════════════════════════════════════════════════
 // APP ROOT
 // ══════════════════════════════════════════════════════
+const Spinner=()=>(
+  <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:C.dark}}>
+    <div style={{width:36,height:36,border:`3px solid ${C.border}`,borderTop:`3px solid ${C.lime}`,borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+    <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+  </div>
+);
+
 export default function App(){
   const[user,setUser]=useState(null);
   const[aba,setAba]=useState("dashboard");
-  const[clientes,setClientes]=useState(CLIENTES_SEED);
-  const[compras,setCompras]=useState(COMPRAS_SEED);
-  const[consultores]=useState(CONSULTORES_SEED);
+  const[clientes,setClientes]=useState([]);
+  const[compras,setCompras]=useState([]);
+  const[consultores,setConsultores]=useState([]);
   const[observacoes,setObservacoes]=useState({});
   const[tickets,setTickets]=useState([]);
+  const[loadingData,setLoadingData]=useState(false);
+
+  // Restore session on load
+  useEffect(()=>{
+    supabase.auth.getSession().then(async({data:{session}})=>{
+      if(session){
+        const{data:perfil}=await supabase.from("perfis").select("*").eq("id",session.user.id).single();
+        if(perfil)setUser({...session.user,...perfil});
+      }
+    });
+    const{data:{subscription}}=supabase.auth.onAuthStateChange((_,session)=>{
+      if(!session){setUser(null);setClientes([]);setCompras([]);setConsultores([]);}
+    });
+    return()=>subscription.unsubscribe();
+  },[]);
+
+  // Load data from Supabase
+  const loadData=useCallback(async()=>{
+    if(!user)return;
+    setLoadingData(true);
+    const[{data:cons},{data:clis},{data:comps},{data:obs},{data:ticks}]=await Promise.all([
+      supabase.from("consultores").select("*").eq("ativo",true).order("nome"),
+      supabase.from("clientes").select("*").eq("ativo",true).order("nome"),
+      supabase.from("compras").select("*").order("data",{ascending:false}),
+      supabase.from("observacoes").select("*").order("created_at",{ascending:false}),
+      supabase.from("tickets").select("*").order("created_at",{ascending:false}).catch(()=>({data:[]})),
+    ]);
+    setConsultores(cons||[]);
+    setClientes(clis||[]);
+    setCompras(comps||[]);
+    // Convert observacoes array to object keyed by cliente_id
+    const obsObj={};
+    (obs||[]).forEach(o=>{
+      if(!obsObj[o.cliente_id])obsObj[o.cliente_id]=[];
+      obsObj[o.cliente_id].push({...o,mes:o.mes_referencia,data:o.created_at?.split("T")[0]});
+    });
+    setObservacoes(obsObj);
+    setTickets(ticks||[]);
+    setLoadingData(false);
+  },[user]);
+
+  useEffect(()=>{loadData();},[loadData]);
 
   if(!user)return<Login onLogin={setUser}/>;
+  if(loadingData)return<Spinner/>;
 
   return(
     <div style={gs.page}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
-      <Sidebar aba={aba} setAba={setAba} user={user} onLogout={()=>setUser(null)} ticketsAbertos={tickets.filter(t=>t.status==="aberto").length}/>
+      <Sidebar aba={aba} setAba={setAba} user={user} onLogout={async()=>{await supabase.auth.signOut();setUser(null);}} ticketsAbertos={tickets.filter(t=>t.status==="aberto").length}/>
       <div style={gs.main}>
         {(()=>{
           switch(aba){
