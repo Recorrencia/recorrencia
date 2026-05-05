@@ -22,55 +22,10 @@ const calcStatus=(ultimaCompra,ciclo)=>{
 const fmtMoney=v=>"R$ "+Number(v).toLocaleString("pt-BR",{minimumFractionDigits:0});
 const fmtDate=d=>d?new Date(d+"T12:00:00").toLocaleDateString("pt-BR"):"—";
 const today=()=>new Date().toISOString().split("T")[0];
-const daysAgo=n=>{const d=new Date();d.setDate(d.getDate()-n);return d.toISOString().split("T")[0];};
+
 
 // ── Seed data ─────────────────────────────────────────
-const CONSULTORES_SEED=[
-  {id:1,nome:"Walesca",setor:"Farm"},
-  {id:2,nome:"Caio",setor:"Farm"},
-  {id:3,nome:"Maycon",setor:"Farm"},
-  {id:4,nome:"Alef",setor:"Farm"},
-  {id:5,nome:"Giovanna",setor:"Farm"},
-  {id:6,nome:"Sangela",setor:"Farm"},
-  {id:7,nome:"Aline",setor:"Farm"},
-  {id:8,nome:"Rellen",setor:"Farm"},
-  {id:9,nome:"Thays",setor:"Farm"},
-  {id:10,nome:"Thaylla",setor:"1ª Compra"},
-  {id:11,nome:"Jandreson",setor:"1ª Compra"},
-];
-
-const CLIENTES_SEED=[
-  {id:1,nome:"Suplementos Vitória",consultor_id:1,setor:"Farm",ciclo_dias:30,ultima_compra:daysAgo(24)},
-  {id:2,nome:"Academia FitMax",consultor_id:1,setor:"Farm",ciclo_dias:30,ultima_compra:daysAgo(35)},
-  {id:3,nome:"Nutri Store SP",consultor_id:2,setor:"Farm",ciclo_dias:15,ultima_compra:daysAgo(10)},
-  {id:4,nome:"Power Gym Suplementos",consultor_id:2,setor:"Farm",ciclo_dias:30,ultima_compra:daysAgo(18)},
-  {id:5,nome:"Fórmula Certa BH",consultor_id:3,setor:"Farm",ciclo_dias:30,ultima_compra:daysAgo(38)},
-  {id:6,nome:"Top Nutri CE",consultor_id:3,setor:"Farm",ciclo_dias:15,ultima_compra:daysAgo(12)},
-  {id:7,nome:"Protein House",consultor_id:4,setor:"Farm",ciclo_dias:30,ultima_compra:daysAgo(5)},
-  {id:8,nome:"Mega Suplementos",consultor_id:4,setor:"Farm",ciclo_dias:60,ultima_compra:daysAgo(45)},
-  {id:9,nome:"Fit Lab RJ",consultor_id:5,setor:"Farm",ciclo_dias:30,ultima_compra:daysAgo(29)},
-  {id:10,nome:"Corpo & Saúde",consultor_id:5,setor:"Farm",ciclo_dias:15,ultima_compra:daysAgo(16)},
-  {id:11,nome:"Alpha Nutrition",consultor_id:6,setor:"Farm",ciclo_dias:30,ultima_compra:daysAgo(8)},
-  {id:12,nome:"Health Point",consultor_id:7,setor:"Farm",ciclo_dias:30,ultima_compra:daysAgo(33)},
-  {id:13,nome:"Sport Life",consultor_id:8,setor:"Farm",ciclo_dias:15,ultima_compra:daysAgo(7)},
-  {id:14,nome:"Nutri Max GO",consultor_id:9,setor:"Farm",ciclo_dias:30,ultima_compra:daysAgo(22)},
-  {id:15,nome:"Força Total Gym",consultor_id:10,setor:"1ª Compra",ciclo_dias:30,ultima_compra:daysAgo(2)},
-  {id:16,nome:"Active Supplements",consultor_id:11,setor:"1ª Compra",ciclo_dias:30,ultima_compra:daysAgo(4)},
-];
-
-const COMPRAS_SEED=(() => {
-  const compras=[];let id=1;
-  CLIENTES_SEED.forEach(cl=>{
-    for(let m=5;m>=0;m--){
-      const d=new Date();d.setMonth(d.getMonth()-m);
-      const skip=m===0&&cl.id%3===0;
-      if(!skip){
-        compras.push({id:id++,cliente_id:cl.id,data:d.toISOString().split("T")[0],valor:Math.floor(Math.random()*8000+2000)});
-      }
-    }
-  });
-  return compras;
-})();
+// Dados carregados do Supabase — sem seed local
 
 // ── Styles ─────────────────────────────────────────────
 const gs={
