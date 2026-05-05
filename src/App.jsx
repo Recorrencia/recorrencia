@@ -1,5 +1,7 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { supabase } from "./lib/supabase.js";
+import ConsultorApp from "./ConsultorApp.jsx";
+import RankingTV from "./RankingTV.jsx";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend, ReferenceLine } from "recharts";
 
 const C = {
@@ -130,11 +132,15 @@ const Login=({onLogin})=>{
   const[email,setEmail]=useState("");
   const[pass,setPass]=useState("");
   const[erro,setErro]=useState("");
+  const[loading,setLoading]=useState(false);
 
-  const handle=()=>{
-    const u=USERS_DEMO.find(u=>u.email===email&&u.pass===pass);
-    if(u){onLogin(u);}
-    else{setErro("E-mail ou senha inválidos.");}
+  const handle=async()=>{
+    setLoading(true);setErro("");
+    const{data,error}=await supabase.auth.signInWithPassword({email,password:pass});
+    if(error){setErro("E-mail ou senha inválidos.");setLoading(false);return;}
+    const{data:perfil}=await supabase.from("perfis").select("*").eq("id",data.user.id).single();
+    onLogin({...data.user,...perfil});
+    setLoading(false);
   };
 
   return(
@@ -144,7 +150,7 @@ const Login=({onLogin})=>{
           <div style={{width:40,height:40,background:C.lime,borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,color:C.dark,fontSize:20}}>R</div>
           <div>
             <div style={{color:C.white,fontWeight:700,fontSize:18}}>RecorrênciaOS</div>
-            <div style={{color:C.gray,fontSize:11}}>Gestão de Carteiras · Modo Demo</div>
+            <div style={{color:C.gray,fontSize:11}}>Gestão de Carteiras</div>
           </div>
         </div>
         <div style={{...gs.card,padding:32}}>
@@ -168,6 +174,8 @@ const Login=({onLogin})=>{
 // ══════════════════════════════════════════════════════
 // SIDEBAR
 // ══════════════════════════════════════════════════════
+const CATEGORIAS=["Loja de Suplementos","Revendedor","Personal","Supermercado","Farmácia","Nutricionista"];
+
 const navItems=[
   {id:"dashboard",label:"Dashboard",icon:"▦"},
   {id:"clientes",label:"Clientes",icon:"◈"},
@@ -175,6 +183,8 @@ const navItems=[
   {id:"compras",label:"Compras",icon:"◆"},
   {id:"ltv",label:"LTV",icon:"◐"},
   {id:"alertas",label:"Alertas",icon:"⚠"},
+  {id:"ranking",label:"Ranking",icon:"★"},
+  {id:"usuarios",label:"Usuários",icon:"⊕"},
   {id:"tickets",label:"Tickets",icon:"✎"},
 ];
 const Sidebar=({aba,setAba,user,onLogout,ticketsAbertos})=>(
@@ -511,6 +521,7 @@ const Clientes=({clientes,setClientes,consultores,compras,setCompras,user,observ
   const[filtroSetor,setFiltroSetor]=useState("Todos");
   const[filtroConsultor,setFiltroConsultor]=useState("Todos");
   const[filtroStatus,setFiltroStatus]=useState("Todos");
+  const[filtroCategoria,setFiltroCategoria]=useState("Todos");
   const[busca,setBusca]=useState("");
   const[modalCompra,setModalCompra]=useState(null);
   const[modalTransf,setModalTransf]=useState(null);
@@ -521,6 +532,7 @@ const Clientes=({clientes,setClientes,consultores,compras,setCompras,user,observ
   const[ncConsultor,setNcConsultor]=useState(consultores[0]?.id||"");
   const[ncCiclo,setNcCiclo]=useState(30);
   const[ncValor,setNcValor]=useState("");
+  const[ncCategoria,setNcCategoria]=useState("");
   const[cData,setCData]=useState(today());
   const[cValor,setCValor]=useState("");
   const[tConsultor,setTConsultor]=useState("");
@@ -541,6 +553,7 @@ const Clientes=({clientes,setClientes,consultores,compras,setCompras,user,observ
     if(filtroSetor!=="Todos"&&c.setor!==filtroSetor)return false;
     if(filtroConsultor!=="Todos"&&String(c.consultor_id)!==filtroConsultor)return false;
     if(filtroStatus!=="Todos"&&c.status.label!==filtroStatus)return false;
+    if(filtroCategoria&&filtroCategoria!=="Todos"&&c.categoria!==filtroCategoria)return false;
     if(busca&&!c.nome.toLowerCase().includes(busca.toLowerCase()))return false;
     return true;
   });
@@ -550,6 +563,7 @@ const Clientes=({clientes,setClientes,consultores,compras,setCompras,user,observ
     const setor=consultores.find(c=>c.id===Number(ncConsultor))?.setor||"1ª Compra";
     const{data:novo,error}=await supabase.from("clientes").insert({
       nome:ncNome,consultor_id:Number(ncConsultor),setor,ciclo_dias:ncCiclo,
+      categoria:ncCategoria||null,
       ultima_compra:ncValor?today():null
     }).select().single();
     if(error){alert("Erro ao cadastrar cliente: "+error.message);return;}
@@ -734,6 +748,10 @@ const Clientes=({clientes,setClientes,consultores,compras,setCompras,user,observ
           {consultores.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
         </select>
         <select style={{...gs.select,width:140}} value={filtroStatus} onChange={e=>setFiltroStatus(e.target.value)}><option>Todos</option><option>Em dia</option><option>Atenção</option><option>Atrasado</option></select>
+        <select style={{...gs.select,width:160}} value={filtroCategoria||"Todos"} onChange={e=>setFiltroCategoria(e.target.value)}>
+          <option value="Todos">Todas categorias</option>
+          {CATEGORIAS.map(c=><option key={c} value={c}>{c}</option>)}
+        </select>
       </div>
       <div style={{display:"flex",flexDirection:"column",gap:10}}>
         {filtered.map(cl=>(
@@ -743,6 +761,7 @@ const Clientes=({clientes,setClientes,consultores,compras,setCompras,user,observ
                 <span style={{color:C.white,fontWeight:700,fontSize:14}}>{cl.nome}</span>
                 <Badge label={cl.status.label} cor={cl.status.cor}/>
                 <span style={{...gs.badge(cl.setor==="Farm"?C.blue:C.lime),fontSize:10}}>{cl.setor}</span>
+                {cl.categoria&&<span style={{...gs.badge(C.purple),fontSize:10}}>{cl.categoria}</span>}
               </div>
               <div style={{display:"flex",gap:20,fontSize:12,color:C.gray,flexWrap:"wrap"}}>
                 <span>{cl.consultor?.nome}</span>
@@ -1212,6 +1231,242 @@ const Alertas=({clientes,compras,consultores,observacoes})=>{
   );
 };
 
+
+
+// ══════════════════════════════════════════════════════
+// RANKING (Gestor)
+// ══════════════════════════════════════════════════════
+const Ranking=({clientes,compras,consultores,metas})=>{
+  const mesAtual=new Date().toISOString().slice(0,7);
+  const [filtroMes,setFiltroMes]=useState(mesAtual);
+
+  const mesesOpts=Array.from({length:6},(_,i)=>{
+    const d=new Date();d.setMonth(d.getMonth()-i);
+    return{value:d.toISOString().slice(0,7),label:d.toLocaleDateString("pt-BR",{month:"long",year:"numeric"})};
+  });
+
+  const ranking=consultores.map(con=>{
+    const carteira=clientes.filter(c=>c.consultor_id===con.id);
+    const ids=carteira.map(c=>c.id);
+    const faturado=compras.filter(cp=>ids.includes(cp.cliente_id)&&cp.data?.startsWith(filtroMes)).reduce((s,c)=>s+Number(c.valor),0);
+    const meta=(metas||[]).find(m=>m.consultor_id===con.id&&m.mes===filtroMes)?.valor||0;
+    const pct=meta>0?Math.min((faturado/meta)*100,100):0;
+    const bateu=faturado>=meta&&meta>0;
+    return{...con,faturado,meta,pct,bateu,carteira:carteira.length};
+  }).sort((a,b)=>b.faturado-a.faturado);
+
+  const MEDAL=["👑","🥈","🥉"];
+  const CORES=[C.lime,"#C0C0C0","#CD7F32"];
+  const totalFaturado=ranking.reduce((s,c)=>s+c.faturado,0);
+  const bateram=ranking.filter(c=>c.bateu).length;
+
+  return(
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:28,flexWrap:"wrap",gap:12}}>
+        <div>
+          <div style={{color:C.white,fontSize:22,fontWeight:700,marginBottom:4}}>★ Ranking Comercial</div>
+          <div style={{color:C.gray,fontSize:13}}>Desempenho por consultor em tempo real</div>
+        </div>
+        <div style={{display:"flex",gap:10,alignItems:"center"}}>
+          <select style={{...gs.select,width:200}} value={filtroMes} onChange={e=>setFiltroMes(e.target.value)}>
+            {mesesOpts.map(m=><option key={m.value} value={m.value}>{m.label}</option>)}
+          </select>
+          <a href="/ranking-tv" target="_blank" style={{...gs.btn(C.panel2,C.lgray),border:`1px solid ${C.border}`,textDecoration:"none",fontSize:12,padding:"9px 14px"}}>
+            📺 Abrir TV
+          </a>
+        </div>
+      </div>
+
+      <div style={{display:"flex",gap:16,marginBottom:24,flexWrap:"wrap"}}>
+        <StatCard label="Total Faturado" value={fmtMoney(totalFaturado)} cor={C.lime} sub="Equipe completa no mês"/>
+        <StatCard label="Bateram a Meta" value={`${bateram}/${ranking.length}`} cor={C.green} sub="consultores"/>
+        <StatCard label="Líder do Mês" value={ranking[0]?.nome||"—"} cor={C.yellow} sub={ranking[0]?fmtMoney(ranking[0].faturado):""}/>
+      </div>
+
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        {ranking.map((con,i)=>(
+          <div key={con.id} style={{
+            ...gs.card,
+            borderColor:i===0?C.lime+"66":i===1?"#C0C0C0"+"44":i===2?"#CD7F32"+"44":C.border,
+            background:i===0?`linear-gradient(135deg,${C.panel} 60%,${C.lime}08)`:C.panel,
+            padding:"20px 28px",
+          }}>
+            <div style={{display:"flex",alignItems:"center",gap:20,flexWrap:"wrap"}}>
+              {/* Posição */}
+              <div style={{width:56,textAlign:"center",flexShrink:0}}>
+                {i<3?<div style={{fontSize:32}}>{MEDAL[i]}</div>:<div style={{color:C.gray,fontSize:24,fontWeight:700}}>#{i+1}</div>}
+              </div>
+              {/* Info */}
+              <div style={{flex:1,minWidth:200}}>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8,flexWrap:"wrap"}}>
+                  <span style={{color:C.white,fontSize:18,fontWeight:700}}>{con.nome}</span>
+                  <span style={{...gs.badge(con.setor==="Farm"?C.blue:C.lime),fontSize:11}}>{con.setor}</span>
+                  {con.bateu&&<span style={{...gs.badge(C.green),fontSize:11}}>✓ Meta batida!</span>}
+                  <span style={{color:C.gray,fontSize:11}}>{con.carteira} clientes</span>
+                </div>
+                <div style={{background:C.border,borderRadius:99,height:8,marginBottom:6}}>
+                  <div style={{
+                    width:`${con.pct}%`,height:8,borderRadius:99,
+                    background:con.bateu?C.green:con.pct>75?C.yellow:con.pct>40?C.blue:C.red,
+                    transition:"width .5s"
+                  }}/>
+                </div>
+                <div style={{color:C.gray,fontSize:12}}>
+                  {con.pct.toFixed(1)}% da meta
+                  {con.meta>0&&!con.bateu&&` · Faltam ${fmtMoney(con.meta-con.faturado)}`}
+                  {con.meta===0&&" · Meta não definida"}
+                </div>
+              </div>
+              {/* Valores */}
+              <div style={{textAlign:"right",flexShrink:0}}>
+                <div style={{color:i===0?C.lime:C.white,fontSize:26,fontWeight:700,marginBottom:4}}>{fmtMoney(con.faturado)}</div>
+                {con.meta>0&&<div style={{color:C.gray,fontSize:13}}>Meta: {fmtMoney(con.meta)}</div>}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// ══════════════════════════════════════════════════════
+// USUÁRIOS (Gestor cria logins e define metas)
+// ══════════════════════════════════════════════════════
+const Usuarios=({consultores,setConsultores,metas,setMetas})=>{
+  const [modalNovo,setModalNovo]=useState(false);
+  const [modalMeta,setModalMeta]=useState(null);
+  const [uNome,setUNome]=useState("");
+  const [uEmail,setUEmail]=useState("");
+  const [uSenha,setUSenha]=useState("");
+  const [uSetor,setUSetor]=useState("Farm");
+  const [uLoading,setULoading]=useState(false);
+  const [metaValor,setMetaValor]=useState("");
+  const [metaMes,setMetaMes]=useState(new Date().toISOString().slice(0,7));
+
+  const criarUsuario=async()=>{
+    if(!uNome||!uEmail||!uSenha)return;
+    setULoading(true);
+    // 1. Criar usuário no Supabase Auth via API
+    const{data,error}=await supabase.auth.admin?.createUser({
+      email:uEmail,password:uSenha,
+      email_confirm:true,
+      user_metadata:{nome:uNome},
+    }).catch(()=>({data:null,error:{message:"Sem permissão admin"}}));
+
+    if(error){
+      // Fallback: cria apenas o consultor com email para referência
+      const{data:con}=await supabase.from("consultores").insert({
+        nome:uNome,setor:uSetor,email:uEmail,ativo:true
+      }).select().single();
+      if(con)setConsultores(p=>[...p,con]);
+      alert(`Consultor cadastrado! Para criar o login, adicione o usuário manualmente no Supabase Auth com e-mail: ${uEmail}`);
+    } else if(data?.user){
+      // Insert perfil
+      await supabase.from("perfis").insert({id:data.user.id,nome:uNome,perfil:"consultor"});
+      // Insert ou update consultor vinculado ao user_id
+      const{data:con}=await supabase.from("consultores").insert({
+        nome:uNome,setor:uSetor,email:uEmail,user_id:data.user.id,ativo:true
+      }).select().single();
+      if(con)setConsultores(p=>[...p,con]);
+      alert(`Usuário ${uNome} criado com sucesso!`);
+    }
+    setModalNovo(false);setUNome("");setUEmail("");setUSenha("");setULoading(false);
+  };
+
+  const salvarMeta=async()=>{
+    if(!metaValor||!modalMeta)return;
+    // Upsert meta
+    const{data}=await supabase.from("metas").upsert({
+      consultor_id:modalMeta.id,
+      mes:metaMes,
+      valor:Number(metaValor),
+    },{onConflict:"consultor_id,mes"}).select().single();
+    if(data){
+      setMetas(p=>[...p.filter(m=>!(m.consultor_id===modalMeta.id&&m.mes===metaMes)),data]);
+    }
+    setModalMeta(null);setMetaValor("");
+  };
+
+  const getMeta=(conId,mes)=>{
+    return (metas||[]).find(m=>m.consultor_id===conId&&m.mes===mes)?.valor||0;
+  };
+
+  const mesAtual=new Date().toISOString().slice(0,7);
+
+  return(
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:28}}>
+        <div>
+          <div style={{color:C.white,fontSize:22,fontWeight:700,marginBottom:4}}>⊕ Usuários & Metas</div>
+          <div style={{color:C.gray,fontSize:13}}>Gerencie acessos e metas dos consultores</div>
+        </div>
+        <button style={gs.btn()} onClick={()=>setModalNovo(true)}>+ Novo Consultor</button>
+      </div>
+
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        {consultores.map(con=>{
+          const meta=getMeta(con.id,mesAtual);
+          return(
+            <div key={con.id} style={{...gs.card,display:"flex",alignItems:"center",gap:16,padding:"16px 24px"}}>
+              <div style={{flex:1}}>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+                  <span style={{color:C.white,fontWeight:700,fontSize:15}}>{con.nome}</span>
+                  <span style={{...gs.badge(con.setor==="Farm"?C.blue:C.lime),fontSize:11}}>{con.setor}</span>
+                  {con.email&&<span style={{color:C.gray,fontSize:12}}>{con.email}</span>}
+                </div>
+                <div style={{fontSize:12,color:C.gray}}>
+                  Meta do mês: <span style={{color:meta>0?C.lime:C.gray,fontWeight:700}}>{meta>0?fmtMoney(meta):"Não definida"}</span>
+                </div>
+              </div>
+              <button style={{...gs.btn(C.panel2,C.lgray),border:`1px solid ${C.border}`,fontSize:12}}
+                onClick={()=>{setModalMeta(con);setMetaValor(meta>0?String(meta):"");setMetaMes(mesAtual);}}>
+                Definir Meta
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      {modalNovo&&(
+        <Modal title="Novo Consultor" subtitle="Cria o acesso e vincula ao setor" onClose={()=>setModalNovo(false)}>
+          <Field label="Nome completo"><input style={gs.input} value={uNome} onChange={e=>setUNome(e.target.value)} placeholder="Ex: Ana Paula"/></Field>
+          <Field label="E-mail de acesso"><input style={gs.input} type="email" value={uEmail} onChange={e=>setUEmail(e.target.value)} placeholder="consultor@email.com"/></Field>
+          <Field label="Senha inicial"><input style={gs.input} type="password" value={uSenha} onChange={e=>setUSenha(e.target.value)} placeholder="Mínimo 6 caracteres"/></Field>
+          <Field label="Setor">
+            <select style={gs.select} value={uSetor} onChange={e=>setUSetor(e.target.value)}>
+              <option>Farm</option><option>1ª Compra</option>
+            </select>
+          </Field>
+          <div style={{background:C.panel2,borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:11,color:C.gray}}>
+            ℹ O consultor receberá acesso apenas à própria carteira.
+          </div>
+          <div style={{display:"flex",gap:10}}>
+            <button style={{...gs.btnOutline,flex:1}} onClick={()=>setModalNovo(false)}>Cancelar</button>
+            <button style={{...gs.btn(),flex:1,opacity:uLoading?0.6:1}} onClick={criarUsuario} disabled={uLoading}>
+              {uLoading?"Criando...":"Criar Acesso"}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {modalMeta&&(
+        <Modal title="Definir Meta" subtitle={modalMeta.nome} onClose={()=>setModalMeta(null)}>
+          <Field label="Mês de referência">
+            <input style={gs.input} type="month" value={metaMes} onChange={e=>setMetaMes(e.target.value)}/>
+          </Field>
+          <Field label="Valor da meta (R$)">
+            <input style={gs.input} type="number" value={metaValor} onChange={e=>setMetaValor(e.target.value)} placeholder="Ex: 50000"/>
+          </Field>
+          <div style={{display:"flex",gap:10,marginTop:8}}>
+            <button style={{...gs.btnOutline,flex:1}} onClick={()=>setModalMeta(null)}>Cancelar</button>
+            <button style={{...gs.btn(),flex:1}} onClick={salvarMeta}>Salvar Meta</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+};
 
 // ══════════════════════════════════════════════════════
 // TICKETS
@@ -1800,23 +2055,12 @@ export default function App(){
   const[consultores,setConsultores]=useState([]);
   const[observacoes,setObservacoes]=useState({});
   const[tickets,setTickets]=useState([]);
+  const[metas,setMetas]=useState([]);
   const[loadingData,setLoadingData]=useState(false);
-  const[loadingAuth,setLoadingAuth]=useState(true); // aguarda verificar sessão
 
-  // Restore session on load
   useEffect(()=>{
-    supabase.auth.getSession().then(async({data:{session}})=>{
-      if(session){
-        const{data:perfil}=await supabase.from("perfis").select("*").eq("id",session.user.id).single();
-        if(perfil)setUser({...session.user,...perfil});
-      }
-      setLoadingAuth(false); // sessão verificada
-    });
-    const{data:{subscription}}=supabase.auth.onAuthStateChange(async(event,session)=>{
-      if(!session){
-        setUser(null);setClientes([]);setCompras([]);setConsultores([]);
-        setLoadingAuth(false);
-      }
+    const{data:{subscription}}=supabase.auth.onAuthStateChange((_,session)=>{
+      if(!session){setUser(null);setClientes([]);setCompras([]);setConsultores([]);}
     });
     return()=>subscription.unsubscribe();
   },[]);
@@ -1825,32 +2069,41 @@ export default function App(){
   const loadData=useCallback(async()=>{
     if(!user)return;
     setLoadingData(true);
-    const[{data:cons},{data:clis},{data:comps},{data:obs},{data:ticks}]=await Promise.all([
-      supabase.from("consultores").select("*").eq("ativo",true).order("nome"),
-      supabase.from("clientes").select("*").eq("ativo",true).order("nome"),
-      supabase.from("compras").select("*").order("data",{ascending:false}),
-      supabase.from("observacoes").select("*").order("created_at",{ascending:false}),
-      supabase.from("tickets").select("*").order("created_at",{ascending:false}).catch(()=>({data:[]})),
-    ]);
-    setConsultores(cons||[]);
-    setClientes(clis||[]);
-    setCompras(comps||[]);
-    // Convert observacoes array to object keyed by cliente_id
-    const obsObj={};
-    (obs||[]).forEach(o=>{
-      if(!obsObj[o.cliente_id])obsObj[o.cliente_id]=[];
-      obsObj[o.cliente_id].push({...o,mes:o.mes_referencia,data:o.created_at?.split("T")[0]});
-    });
-    setObservacoes(obsObj);
-    setTickets(ticks||[]);
-    setLoadingData(false);
+    try{
+      const[r1,r2,r3,r4,r5,r6]=await Promise.all([
+        supabase.from("consultores").select("*").eq("ativo",true).order("nome"),
+        supabase.from("clientes").select("*").eq("ativo",true).order("nome"),
+        supabase.from("compras").select("*").order("data",{ascending:false}),
+        supabase.from("observacoes").select("*").order("created_at",{ascending:false}),
+        supabase.from("tickets").select("*").order("created_at",{ascending:false}),
+        supabase.from("metas").select("*"),
+      ]);
+      setConsultores(r1.data||[]);
+      setClientes(r2.data||[]);
+      setCompras(r3.data||[]);
+      const obsObj={};
+      (r4.data||[]).forEach(o=>{
+        if(!obsObj[o.cliente_id])obsObj[o.cliente_id]=[];
+        obsObj[o.cliente_id].push({...o,mes:o.mes_referencia,data:o.created_at?.split("T")[0]});
+      });
+      setObservacoes(obsObj);
+      setTickets(r5.data||[]);
+      setMetas(r6.data||[]);
+    }catch(e){
+      console.error("Erro ao carregar dados:",e);
+    }finally{
+      setLoadingData(false);
+    }
   },[user]);
 
   useEffect(()=>{loadData();},[loadData]);
 
-  if(loadingAuth)return<Spinner/>; // aguarda verificar sessão antes de mostrar login
   if(!user)return<Login onLogin={setUser}/>;
   if(loadingData)return<Spinner/>;
+  // Rota pública ranking TV
+  if(window.location.pathname==="/ranking-tv")return<RankingTV/>;
+  // Portal do consultor
+  if(user?.perfil==="consultor")return<ConsultorApp user={user} onLogout={async()=>{await supabase.auth.signOut();setUser(null);}}/>;
 
   return(
     <div style={gs.page}>
@@ -1865,6 +2118,8 @@ export default function App(){
             case"compras":return<Compras compras={compras} clientes={clientes} consultores={consultores}/>;
             case"ltv":return<LTV clientes={clientes} compras={compras} consultores={consultores}/>;
             case"alertas":return<Alertas clientes={clientes} compras={compras} consultores={consultores} observacoes={observacoes}/>;
+            case"ranking":return<Ranking clientes={clientes} compras={compras} consultores={consultores} metas={metas}/>;
+            case"usuarios":return<Usuarios consultores={consultores} setConsultores={setConsultores} metas={metas} setMetas={setMetas}/>;
             case"tickets":return<Tickets tickets={tickets} setTickets={setTickets} clientes={clientes} compras={compras} setCompras={setCompras} setClientes={setClientes} user={user} consultores={consultores}/>;
             default:return null;
           }
