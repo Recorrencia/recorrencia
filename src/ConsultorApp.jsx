@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, ReferenceLine } from "recharts";
 import { supabase } from "./lib/supabase.js";
 import { C, gs, fmtMoney, fmtDate, today, calcStatus, CATEGORIAS, Badge, ProgressBar, StatCard, Field, Modal, PageHeader } from "./utils.jsx";
 
@@ -43,107 +43,194 @@ const ConsultorSidebar = ({ aba, setAba, user, onLogout }) => {
 };
 
 // ── Minha Carteira ────────────────────────────────────
-const MinhaCarteira = ({ clientes, compras, consultorId, meta }) => {
-  const mesAtual = new Date().toISOString().slice(0,7);
+const MinhaCarteira = ({ clientes, compras, consultorId, metas }) => {
   const hoje = new Date();
+  const mesAtual = hoje.toISOString().slice(0,7);
+  const [filtroMes, setFiltroMes] = useState(mesAtual);
+
   const diasNoMes = new Date(hoje.getFullYear(), hoje.getMonth()+1, 0).getDate();
   const diaAtual = hoje.getDate();
+  const diasRestantes = Math.max(1, diasNoMes - diaAtual);
+
+  const metaObj = metas || { meta_desejada:0, meta_desafio:0, meta_ultra:0 };
+  const { meta_desejada:desejada=0, meta_desafio:desafio=0, meta_ultra:ultra=0 } = metaObj;
 
   const faturadoMes = compras
-    .filter(cp => cp.data?.startsWith(mesAtual))
+    .filter(cp => cp.data?.startsWith(filtroMes))
     .reduce((s,c) => s+Number(c.valor), 0);
 
-  const pctMeta = meta > 0 ? Math.min((faturadoMes/meta)*100, 100) : 0;
-  const faltaMeta = Math.max(0, meta - faturadoMes);
+  const ticketMedio = (() => {
+    const comprasMes = compras.filter(cp => cp.data?.startsWith(filtroMes));
+    return comprasMes.length > 0 ? faturadoMes/comprasMes.length : 0;
+  })();
+
   const mediaDiaria = diaAtual > 0 ? faturadoMes/diaAtual : 0;
-  const mediaNecessaria = faltaMeta > 0 ? faltaMeta/(diasNoMes-diaAtual+1) : 0;
+
+  // Próxima meta não batida
+  const proximaMeta = faturadoMes < desejada ? desejada
+    : faturadoMes < desafio ? desafio
+    : faturadoMes < ultra ? ultra : null;
+  const mediaNecessaria = proximaMeta ? Math.max(0,(proximaMeta-faturadoMes)/diasRestantes) : 0;
+
+  // Níveis de meta
+  const niveis = [
+    { label:"Meta Desejada", icon:"🎯", valor:desejada, cor:C.green },
+    { label:"Meta Desafio",  icon:"🔥", valor:desafio,  cor:C.yellow },
+    { label:"Ultrameta",     icon:"⚡", valor:ultra,    cor:C.red },
+  ].filter(n => n.valor > 0);
 
   const enriched = clientes.map(cl => ({ ...cl, status:calcStatus(cl.ultima_compra, cl.ciclo_dias) }));
   const emDia = enriched.filter(c => c.status.label==="Em dia").length;
   const atencao = enriched.filter(c => c.status.label==="Atenção").length;
   const atrasado = enriched.filter(c => c.status.label==="Atrasado").length;
 
-  // Faturamento últimos 6 meses
-  const chartData = Array.from({length:6}, (_,i) => {
-    const d = new Date(); d.setMonth(d.getMonth()-(5-i));
-    const m = d.toISOString().slice(0,7);
-    const mes = d.toLocaleDateString("pt-BR", { month:"short" });
-    const val = compras.filter(cp => cp.data?.startsWith(m)).reduce((s,c)=>s+Number(c.valor),0);
-    return { mes, valor:Math.round(val) };
+  // Gráfico diário do mês filtrado
+  const [ano, mes] = filtroMes.split("-").map(Number);
+  const diasDoMes = new Date(ano, mes, 0).getDate();
+  const dailyData = Array.from({length:diasDoMes}, (_,i) => {
+    const dia = i+1;
+    const dataStr = `${filtroMes}-${String(dia).padStart(2,"0")}`;
+    const valor = compras.filter(cp=>cp.data===dataStr).reduce((s,c)=>s+Number(c.valor),0);
+    return { dia:String(dia), valor:Math.round(valor) };
+  });
+
+  // Linha de meta diária necessária
+  const metaDiaria = proximaMeta && filtroMes===mesAtual
+    ? Math.round(mediaNecessaria)
+    : desejada > 0 ? Math.round(desejada/diasDoMes) : 0;
+
+  const mesesOpts = Array.from({length:6},(_,i)=>{
+    const d=new Date();d.setMonth(d.getMonth()-i);
+    return{value:d.toISOString().slice(0,7),label:d.toLocaleDateString("pt-BR",{month:"long",year:"numeric"})};
   });
 
   const tt = { background:C.panel, border:`1px solid ${C.border}`, borderRadius:8, fontSize:12, color:C.white, fontFamily:"inherit" };
 
   return (
     <div>
-      <div style={{ marginBottom:28 }}>
-        <div style={{ color:C.white, fontSize:22, fontWeight:700, marginBottom:4 }}>Minha Carteira</div>
-        <div style={{ color:C.gray, fontSize:13 }}>{new Date().toLocaleDateString("pt-BR", { weekday:"long", day:"numeric", month:"long" })}</div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:28, flexWrap:"wrap", gap:12 }}>
+        <div>
+          <div style={{ color:C.white, fontSize:22, fontWeight:700, marginBottom:4 }}>Minha Carteira</div>
+          <div style={{ color:C.gray, fontSize:13 }}>{hoje.toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long"})}</div>
+        </div>
+        <select style={{...gs.select,width:200}} value={filtroMes} onChange={e=>setFiltroMes(e.target.value)}>
+          {mesesOpts.map(m=><option key={m.value} value={m.value}>{m.label}</option>)}
+        </select>
       </div>
 
-      {/* Meta */}
-      <div style={{ ...gs.card, marginBottom:20, borderColor:pctMeta>=100?C.green+"55":C.border, background:pctMeta>=100?`linear-gradient(135deg,${C.panel} 60%,${C.green}08)`:C.panel }}>
-        <div style={{ color:C.gray, fontSize:11, letterSpacing:1, textTransform:"uppercase", marginBottom:12 }}>Meta do Mês</div>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-end", flexWrap:"wrap", gap:16, marginBottom:16 }}>
+      {/* Faturado destaque */}
+      <div style={{...gs.card, marginBottom:20, background:`linear-gradient(135deg,${C.panel} 60%,${C.lime}08)`, borderColor:C.lime+"33"}}>
+        <div style={{color:C.gray,fontSize:11,letterSpacing:1,textTransform:"uppercase",marginBottom:12}}>Faturamento do Mês</div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:20}}>
           <div>
-            <div style={{ color:pctMeta>=100?C.green:C.white, fontSize:36, fontWeight:700, lineHeight:1, marginBottom:4 }}>
-              {fmtMoney(faturadoMes)}
-            </div>
-            <div style={{ color:C.gray, fontSize:13 }}>de {fmtMoney(meta)} · {pctMeta.toFixed(1)}%</div>
-          </div>
-          <div style={{ display:"flex", gap:24, flexWrap:"wrap" }}>
-            <div style={{ textAlign:"center" }}>
-              <div style={{ color:C.lime, fontSize:20, fontWeight:700 }}>{fmtMoney(mediaDiaria)}</div>
-              <div style={{ color:C.gray, fontSize:11 }}>Média diária atual</div>
-            </div>
-            {faltaMeta > 0 && (
-              <div style={{ textAlign:"center" }}>
-                <div style={{ color:C.yellow, fontSize:20, fontWeight:700 }}>{fmtMoney(mediaNecessaria)}</div>
-                <div style={{ color:C.gray, fontSize:11 }}>Média necessária/dia</div>
+            <div style={{color:C.lime,fontSize:40,fontWeight:700,lineHeight:1,marginBottom:6}}>{fmtMoney(faturadoMes)}</div>
+            {proximaMeta?(
+              <div style={{color:C.gray,fontSize:13}}>
+                Próxima meta: <span style={{color:C.white,fontWeight:700}}>{fmtMoney(proximaMeta)}</span>
+                {" · "}<span style={{color:C.yellow}}>Faltam {fmtMoney(proximaMeta-faturadoMes)}</span>
               </div>
-            )}
-            {faltaMeta > 0 && (
-              <div style={{ textAlign:"center" }}>
-                <div style={{ color:C.red, fontSize:20, fontWeight:700 }}>{fmtMoney(faltaMeta)}</div>
-                <div style={{ color:C.gray, fontSize:11 }}>Falta para a meta</div>
+            ):<div style={{color:C.green,fontWeight:700,fontSize:14}}>🎉 Todas as metas batidas!</div>}
+          </div>
+          <div style={{display:"flex",gap:20,flexWrap:"wrap"}}>
+            <div style={{textAlign:"center"}}>
+              <div style={{color:C.lime,fontSize:20,fontWeight:700}}>{fmtMoney(mediaDiaria)}</div>
+              <div style={{color:C.gray,fontSize:11}}>Média diária atual</div>
+            </div>
+            <div style={{textAlign:"center"}}>
+              <div style={{color:C.blue,fontSize:20,fontWeight:700}}>{fmtMoney(ticketMedio)}</div>
+              <div style={{color:C.gray,fontSize:11}}>Ticket médio</div>
+            </div>
+            {proximaMeta&&filtroMes===mesAtual&&(
+              <div style={{textAlign:"center"}}>
+                <div style={{color:C.yellow,fontSize:20,fontWeight:700}}>{fmtMoney(mediaNecessaria)}</div>
+                <div style={{color:C.gray,fontSize:11}}>Necessário/dia</div>
               </div>
             )}
           </div>
         </div>
-        <div style={{ background:C.border, borderRadius:99, height:12 }}>
-          <div style={{
-            width:`${pctMeta}%`, height:12, borderRadius:99,
-            background:pctMeta>=100?C.green:pctMeta>75?C.yellow:pctMeta>40?C.blue:C.red,
-            transition:"width .5s"
-          }}/>
-        </div>
-        {pctMeta >= 100 && (
-          <div style={{ color:C.green, fontSize:14, fontWeight:700, marginTop:10, textAlign:"center" }}>🎉 Meta batida!</div>
-        )}
       </div>
+
+      {/* 3 Níveis de Meta */}
+      {niveis.length > 0 && (
+        <div style={{display:"flex",gap:16,marginBottom:20,flexWrap:"wrap"}}>
+          {niveis.map(n=>{
+            const pct = n.valor > 0 ? (faturadoMes/n.valor)*100 : 0;
+            const bateu = faturadoMes >= n.valor;
+            const falta = Math.max(0, n.valor-faturadoMes);
+            const diasNec = falta > 0 && filtroMes===mesAtual ? Math.ceil(falta/diasRestantes) : 0;
+            return(
+              <div key={n.label} style={{
+                ...gs.card, flex:1, minWidth:180,
+                borderColor: bateu?n.cor+"66":C.border,
+                background: bateu?`linear-gradient(135deg,${C.panel} 60%,${n.cor}08)`:C.panel,
+              }}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                  <div style={{color:C.gray,fontSize:11,textTransform:"uppercase",letterSpacing:0.5}}>{n.icon} {n.label}</div>
+                  {bateu&&<span style={{...gs.badge(n.cor),fontSize:10}}>✓ Batida!</span>}
+                </div>
+                <div style={{color:n.cor,fontSize:24,fontWeight:700,marginBottom:4}}>{pct.toFixed(1)}%</div>
+                <div style={{color:C.white,fontSize:14,marginBottom:8}}>{fmtMoney(n.valor)}</div>
+                <div style={{background:C.border,borderRadius:99,height:6,marginBottom:8}}>
+                  <div style={{
+                    width:`${Math.min(pct,100)}%`,height:6,borderRadius:99,
+                    background:n.cor,transition:"width .5s"
+                  }}/>
+                </div>
+                {!bateu?(
+                  <div style={{fontSize:11,color:C.gray}}>
+                    Faltam <span style={{color:n.cor,fontWeight:700}}>{fmtMoney(falta)}</span>
+                    {diasNec>0&&<span> · R${(diasNec/1000).toFixed(1)}k/dia</span>}
+                  </div>
+                ):(
+                  <div style={{fontSize:11,color:n.cor,fontWeight:700}}>🎉 Parabéns!</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Stats carteira */}
-      <div style={{ display:"flex", gap:16, marginBottom:20, flexWrap:"wrap" }}>
+      <div style={{display:"flex",gap:16,marginBottom:20,flexWrap:"wrap"}}>
         <StatCard label="Total Clientes" value={clientes.length} sub="na sua carteira"/>
         <StatCard label="Em dia" value={emDia} cor={C.green} sub={`${clientes.length?Math.round(emDia/clientes.length*100):0}% da carteira`}/>
         <StatCard label="Atenção" value={atencao} cor={C.yellow} sub="Próximos ao vencimento"/>
         <StatCard label="Atrasados" value={atrasado} cor={C.red} sub="Requer contato"/>
       </div>
 
-      {/* Gráfico faturamento */}
+      {/* Gráfico diário */}
       <div style={gs.card}>
-        <div style={{ color:C.white, fontWeight:700, marginBottom:4, fontSize:14 }}>Faturamento por Mês</div>
-        <div style={{ color:C.gray, fontSize:12, marginBottom:16 }}>Últimos 6 meses</div>
-        <ResponsiveContainer width="100%" height={200}>
-          <BarChart data={chartData}>
-            <XAxis dataKey="mes" tick={{ fill:C.gray, fontSize:11 }} axisLine={false} tickLine={false}/>
-            <YAxis tick={{ fill:C.gray, fontSize:10 }} axisLine={false} tickLine={false} tickFormatter={v=>"R$"+(v/1000).toFixed(0)+"k"}/>
-            <Tooltip contentStyle={tt} wrapperStyle={{outline:"none"}} itemStyle={{color:C.lgray}} cursor={{fill:C.white,fillOpacity:0.05}} formatter={v=>[fmtMoney(v),"Faturado"]}/>
+        <div style={{color:C.white,fontWeight:700,marginBottom:4,fontSize:14}}>Vendas Diárias — {mesesOpts.find(m=>m.value===filtroMes)?.label}</div>
+        <div style={{color:C.gray,fontSize:12,marginBottom:16}}>
+          {metaDiaria>0&&<>Linha de referência: <span style={{color:C.yellow,fontWeight:700}}>{fmtMoney(metaDiaria)}/dia</span> necessários para {proximaMeta&&filtroMes===mesAtual?"próxima meta":"meta desejada"}</>}
+        </div>
+        <ResponsiveContainer width="100%" height={220}>
+          <BarChart data={dailyData} margin={{top:10,right:10,left:0,bottom:0}}>
+            <XAxis dataKey="dia" tick={{fill:C.gray,fontSize:9}} axisLine={false} tickLine={false}/>
+            <YAxis tick={{fill:C.gray,fontSize:10}} axisLine={false} tickLine={false} tickFormatter={v=>v>0?"R$"+(v/1000).toFixed(1)+"k":""}/>
+            <Tooltip contentStyle={tt} wrapperStyle={{outline:"none"}} itemStyle={{color:C.lgray}} cursor={{fill:C.white,fillOpacity:0.05}} formatter={v=>[fmtMoney(v),"Vendas"]}/>
+            {metaDiaria>0&&<ReferenceLine y={metaDiaria} stroke={C.yellow} strokeDasharray="4 2" strokeWidth={2}/>}
             <Bar dataKey="valor" radius={[4,4,0,0]}>
-              {chartData.map((d,i)=><Cell key={i} fill={i===5?C.lime:C.lime+"55"}/>)}
+              {dailyData.map((d,i)=><Cell key={i} fill={d.valor>=metaDiaria&&d.valor>0?C.lime:d.valor>0?C.lime+"77":C.border}/>)}
             </Bar>
           </BarChart>
         </ResponsiveContainer>
+        {metaDiaria>0&&(
+          <div style={{display:"flex",gap:16,marginTop:8,fontSize:11}}>
+            <div style={{display:"flex",alignItems:"center",gap:6}}>
+              <div style={{width:12,height:12,borderRadius:3,background:C.lime}}/>
+              <span style={{color:C.gray}}>Acima da meta diária</span>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:6}}>
+              <div style={{width:12,height:12,borderRadius:3,background:C.lime+"77"}}/>
+              <span style={{color:C.gray}}>Abaixo da meta diária</span>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:6}}>
+              <div style={{width:24,height:2,background:C.yellow,borderRadius:99}}/>
+              <span style={{color:C.gray}}>Meta diária necessária</span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -405,7 +492,7 @@ export default function ConsultorApp({ user, onLogout }) {
   const [aba, setAba] = useState("carteira");
   const [clientes, setClientes] = useState([]);
   const [compras, setCompras] = useState([]);
-  const [meta, setMeta] = useState(0);
+  const [metas, setMetas] = useState(null);
   const [consultorId, setConsultorId] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -426,7 +513,7 @@ export default function ConsultorApp({ user, onLogout }) {
       const comprasFiltradas = (comps||[]).filter(cp => ids.includes(cp.cliente_id));
       setClientes(clis||[]);
       setCompras(comprasFiltradas);
-      setMeta(metaData?.valor||0);
+      setMetas(metaData||null);
     } catch(e) {
       console.error(e);
     } finally {
@@ -448,7 +535,7 @@ export default function ConsultorApp({ user, onLogout }) {
       <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
       <ConsultorSidebar aba={aba} setAba={setAba} user={user} onLogout={()=>{sessionStorage.removeItem("recorrenciaos-user");onLogout();}}/>
       <div style={gs.main}>
-        {aba === "carteira" && <MinhaCarteira clientes={clientes} compras={compras} consultorId={consultorId} meta={meta}/>}
+        {aba === "carteira" && <MinhaCarteira clientes={clientes} compras={compras} consultorId={consultorId} metas={metas}/>}
         {aba === "clientes" && <MeusClientes clientes={clientes} compras={compras} user={user} setCompras={setCompras}/>}
       </div>
     </div>

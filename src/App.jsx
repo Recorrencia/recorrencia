@@ -1302,7 +1302,9 @@ const Usuarios=({consultores,setConsultores,metas,setMetas})=>{
   const [uSenha,setUSenha]=useState("");
   const [uSetor,setUSetor]=useState("Farm");
   const [uLoading,setULoading]=useState(false);
-  const [metaValor,setMetaValor]=useState("");
+  const [metaDesejada,setMetaDesejada]=useState("");
+  const [metaDesafio,setMetaDesafio]=useState("");
+  const [metaUltra,setMetaUltra]=useState("");
   const [metaMes,setMetaMes]=useState(new Date().toISOString().slice(0,7));
 
   const criarUsuario=async()=>{
@@ -1336,21 +1338,23 @@ const Usuarios=({consultores,setConsultores,metas,setMetas})=>{
   };
 
   const salvarMeta=async()=>{
-    if(!metaValor||!modalMeta)return;
-    // Upsert meta
+    if(!modalMeta)return;
     const{data}=await supabase.from("metas").upsert({
       consultor_id:modalMeta.id,
       mes:metaMes,
-      valor:Number(metaValor),
+      meta_desejada:Number(metaDesejada)||0,
+      meta_desafio:Number(metaDesafio)||0,
+      meta_ultra:Number(metaUltra)||0,
     },{onConflict:"consultor_id,mes"}).select().single();
     if(data){
       setMetas(p=>[...p.filter(m=>!(m.consultor_id===modalMeta.id&&m.mes===metaMes)),data]);
     }
-    setModalMeta(null);setMetaValor("");
+    setModalMeta(null);
+    setMetaDesejada("");setMetaDesafio("");setMetaUltra("");
   };
 
   const getMeta=(conId,mes)=>{
-    return (metas||[]).find(m=>m.consultor_id===conId&&m.mes===mes)?.valor||0;
+    return (metas||[]).find(m=>m.consultor_id===conId&&m.mes===mes)||null;
   };
 
   const mesAtual=new Date().toISOString().slice(0,7);
@@ -1381,7 +1385,14 @@ const Usuarios=({consultores,setConsultores,metas,setMetas})=>{
                 </div>
               </div>
               <button style={{...gs.btn(C.panel2,C.lgray),border:`1px solid ${C.border}`,fontSize:12}}
-                onClick={()=>{setModalMeta(con);setMetaValor(meta>0?String(meta):"");setMetaMes(mesAtual);}}>
+                onClick={()=>{
+                const m=getMeta(con.id,mesAtual);
+                setModalMeta(con);
+                setMetaDesejada(m?.meta_desejada?String(m.meta_desejada):"");
+                setMetaDesafio(m?.meta_desafio?String(m.meta_desafio):"");
+                setMetaUltra(m?.meta_ultra?String(m.meta_ultra):"");
+                setMetaMes(mesAtual);
+              }}>
                 Definir Meta
               </button>
             </div>
@@ -1412,16 +1423,25 @@ const Usuarios=({consultores,setConsultores,metas,setMetas})=>{
       )}
 
       {modalMeta&&(
-        <Modal title="Definir Meta" subtitle={modalMeta.nome} onClose={()=>setModalMeta(null)}>
+        <Modal title="Definir Metas" subtitle={modalMeta.nome} onClose={()=>setModalMeta(null)}>
           <Field label="Mês de referência">
             <input style={gs.input} type="month" value={metaMes} onChange={e=>setMetaMes(e.target.value)}/>
           </Field>
-          <Field label="Valor da meta (R$)">
-            <input style={gs.input} type="number" value={metaValor} onChange={e=>setMetaValor(e.target.value)} placeholder="Ex: 50000"/>
-          </Field>
-          <div style={{display:"flex",gap:10,marginTop:8}}>
+          <div style={{background:C.panel2,borderRadius:8,padding:"12px 14px",marginBottom:16}}>
+            <div style={{color:C.gray,fontSize:11,marginBottom:12}}>Os três níveis de meta se acumulam — ao bater um, o sistema passa automaticamente para o próximo.</div>
+            <Field label="🎯 Meta Desejada (R$)">
+              <input style={gs.input} type="number" value={metaDesejada} onChange={e=>setMetaDesejada(e.target.value)} placeholder="Ex: 40000"/>
+            </Field>
+            <Field label="🔥 Meta Desafio (R$)">
+              <input style={gs.input} type="number" value={metaDesafio} onChange={e=>setMetaDesafio(e.target.value)} placeholder="Ex: 60000"/>
+            </Field>
+            <Field label="⚡ Ultrameta (R$)">
+              <input style={gs.input} type="number" value={metaUltra} onChange={e=>setMetaUltra(e.target.value)} placeholder="Ex: 80000"/>
+            </Field>
+          </div>
+          <div style={{display:"flex",gap:10}}>
             <button style={{...gs.btnOutline,flex:1}} onClick={()=>setModalMeta(null)}>Cancelar</button>
-            <button style={{...gs.btn(),flex:1}} onClick={salvarMeta}>Salvar Meta</button>
+            <button style={{...gs.btn(),flex:1}} onClick={salvarMeta}>Salvar Metas</button>
           </div>
         </Modal>
       )}
