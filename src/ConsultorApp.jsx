@@ -209,8 +209,6 @@ const MeusClientes = ({ clientes, compras, user, setCompras }) => {
     // Update ultima_compra do cliente localmente
     const hoje = new Date().toISOString().split("T")[0];
     setModalCompra(null); setCValor(""); setCData("");
-    // Reload to get fresh data
-    window.location.reload();
   };
 
   const addObs = async () => {
@@ -319,6 +317,23 @@ const MeusClientes = ({ clientes, compras, user, setCompras }) => {
           <div style={{ display:"flex", gap:10, marginTop:8 }}>
             <button style={{ ...gs.btnOutline, flex:1 }} onClick={() => setModalObs(null)}>Cancelar</button>
             <button style={{ ...gs.btn(), flex:1 }} onClick={addObs}>Salvar</button>
+          </div>
+        </Modal>
+      )}
+      {modalCompra && (
+        <Modal title="Registrar Venda" subtitle={modalCompra.nome} onClose={() => setModalCompra(null)}>
+          <Field label="Data da venda">
+            <input style={gs.input} type="date" value={cData} onChange={e => setCData(e.target.value)}/>
+          </Field>
+          <Field label="Valor (R$)">
+            <input style={gs.input} type="number" value={cValor} onChange={e => setCValor(e.target.value)} placeholder="Ex: 5000"/>
+          </Field>
+          <div style={{ background:"#181B22", borderRadius:8, padding:"10px 14px", marginBottom:12, fontSize:11, color:"#6B7280" }}>
+            ℹ A venda será registrada e atualizará o dashboard e ranking automaticamente.
+          </div>
+          <div style={{ display:"flex", gap:10 }}>
+            <button style={{ ...gs.btnOutline, flex:1 }} onClick={() => setModalCompra(null)}>Cancelar</button>
+            <button style={{ ...gs.btn(), flex:1 }} onClick={addCompra}>Confirmar Venda</button>
           </div>
         </Modal>
       )}
@@ -431,7 +446,7 @@ export default function ConsultorApp({ user, onLogout }) {
   return (
     <div style={gs.page}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
-      <ConsultorSidebar aba={aba} setAba={setAba} user={user} onLogout={onLogout}/>
+      <ConsultorSidebar aba={aba} setAba={setAba} user={user} onLogout={()=>{sessionStorage.removeItem("recorrenciaos-user");onLogout();}}/>
       <div style={gs.main}>
         {aba === "carteira" && <MinhaCarteira clientes={clientes} compras={compras} consultorId={consultorId} meta={meta}/>}
         {aba === "clientes" && <MeusClientes clientes={clientes} compras={compras} user={user} setCompras={setCompras}/>}

@@ -737,6 +737,12 @@ const Clientes=({clientes,setClientes,consultores,compras,setCompras,user,observ
       {modalNovoCliente&&<Modal title="Novo Cliente" subtitle="Preencha os dados do cliente" onClose={()=>setModalNovoCliente(false)}>
         <Field label="Nome do cliente"><input style={gs.input} value={ncNome} onChange={e=>setNcNome(e.target.value)} placeholder="Ex: Academia FitMax"/></Field>
         <Field label="Consultor responsável"><select style={gs.select} value={ncConsultor} onChange={e=>setNcConsultor(e.target.value)}>{consultores.map(c=><option key={c.id} value={c.id}>{c.nome} ({c.setor})</option>)}</select></Field>
+        <Field label="Categoria">
+          <select style={gs.select} value={ncCategoria} onChange={e=>setNcCategoria(e.target.value)}>
+            <option value="">Selecione a categoria...</option>
+            {CATEGORIAS.map(c=><option key={c} value={c}>{c}</option>)}
+          </select>
+        </Field>
         <Field label="Ciclo de compra"><select style={gs.select} value={ncCiclo} onChange={e=>setNcCiclo(Number(e.target.value))}>{[15,30,45,60].map(d=><option key={d} value={d}>{d} dias</option>)}</select></Field>
         <Field label="Valor da 1ª compra (opcional)"><input style={gs.input} type="number" value={ncValor} onChange={e=>setNcValor(e.target.value)} placeholder="R$ 0,00"/></Field>
         <div style={{display:"flex",gap:10,marginTop:8}}>
@@ -2012,10 +2018,43 @@ export default function App(){
   const[tickets,setTickets]=useState([]);
   const[metas,setMetas]=useState([]);
   const[loadingData,setLoadingData]=useState(false);
+  const[sessionChecked,setSessionChecked]=useState(false);
 
   useEffect(()=>{
-    const{data:{subscription}}=supabase.auth.onAuthStateChange((_,session)=>{
-      if(!session){setUser(null);setClientes([]);setCompras([]);setConsultores([]);}
+    // Tenta recuperar usuário do sessionStorage primeiro (persiste ao F5)
+    const cachedUser = sessionStorage.getItem('recorrenciaos-user');
+    if(cachedUser){
+      try{
+        setUser(JSON.parse(cachedUser));
+        setSessionChecked(true);
+        return; // já tem usuário, não precisa verificar sessão
+      }catch(e){
+        sessionStorage.removeItem('recorrenciaos-user');
+      }
+    }
+
+    // Se não tem cache, verifica sessão do Supabase
+    supabase.auth.getSession().then(async({data:{session}})=>{
+      if(session?.user){
+        try{
+          const{data:perfil}=await supabase.from("perfis").select("*").eq("id",session.user.id).single();
+          const u=perfil?{...session.user,...perfil}:session.user;
+          setUser(u);
+          sessionStorage.setItem('recorrenciaos-user', JSON.stringify(u));
+        }catch(e){
+          setUser(session.user);
+        }
+      }
+      setSessionChecked(true);
+    });
+
+    const{data:{subscription}}=supabase.auth.onAuthStateChange((event,session)=>{
+      if(event==="SIGNED_OUT"){
+        setUser(null);
+        sessionStorage.removeItem('recorrenciaos-user');
+        setClientes([]);setCompras([]);setConsultores([]);
+        setSessionChecked(true);
+      }
     });
     return()=>subscription.unsubscribe();
   },[]);
@@ -2053,12 +2092,16 @@ export default function App(){
 
   useEffect(()=>{loadData();},[loadData]);
 
-  if(!user)return<Login onLogin={setUser}/>;
+  if(!sessionChecked)return<Spinner/>;
+  if(!user)return<Login onLogin={u=>{
+    setUser(u);
+    sessionStorage.setItem('recorrenciaos-user', JSON.stringify(u));
+  }}/>;
   if(loadingData)return<Spinner/>;
   // Rota pública ranking TV
   if(window.location.pathname==="/ranking-tv")return<RankingTV/>;
   // Portal do consultor
-  if(user?.perfil==="consultor")return<ConsultorApp user={user} onLogout={async()=>{await supabase.auth.signOut();setUser(null);}}/>;
+  if(user?.perfil==="consultor")return<ConsultorApp user={user} onLogout={async()=>{await supabase.auth.signOut();sessionStorage.removeItem("recorrenciaos-user");setUser(null);}}/>;
 
   return(
     <div style={gs.page}>
