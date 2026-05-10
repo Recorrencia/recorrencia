@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, ReferenceLine } from "recharts";
 import { supabase } from "./lib/supabase.js";
+import VendaModal from "./VendaModal.jsx";
 import { C, gs, fmtMoney, fmtDate, today, calcStatus, CATEGORIAS, Badge, ProgressBar, StatCard, Field, Modal, PageHeader } from "./utils.jsx";
 
 // ── Consultor Sidebar ─────────────────────────────────
@@ -8,6 +9,8 @@ const ConsultorSidebar = ({ aba, setAba, user, onLogout }) => {
   const navItems = [
     { id:"carteira", label:"Minha Carteira", icon:"▦" },
     { id:"clientes", label:"Meus Clientes", icon:"◈" },
+    { id:"vendas", label:"Minhas Vendas", icon:"◆" },
+    { id:"tickets", label:"Tickets", icon:"✎" },
   ];
   return (
     <div style={gs.sidebar}>
@@ -277,26 +280,9 @@ const MeusClientes = ({ clientes, compras, user, setCompras }) => {
     return true;
   });
 
-  const [modalCompra, setModalCompra] = useState(null);
-  const [cData, setCData] = useState("");
-  const [cValor, setCValor] = useState("");
+  const [modalVenda, setModalVenda] = useState(null);
 
-  const addCompra = async () => {
-    if (!cValor || !modalCompra) return;
-    const dataVenda = cData || new Date().toISOString().split("T")[0];
-    const { data:cp, error } = await supabase.from("compras").insert({
-      cliente_id: modalCompra.id,
-      data: dataVenda,
-      valor: Number(cValor),
-      registrado_por: user?.id,
-    }).select().single();
-    if (error) { alert("Erro ao registrar venda: " + error.message); return; }
-    // Update local state
-    setCompras(p => [...p, cp]);
-    // Update ultima_compra do cliente localmente
-    const hoje = new Date().toISOString().split("T")[0];
-    setModalCompra(null); setCValor(""); setCData("");
-  };
+
 
   const addObs = async () => {
     if (!obsTexto || !modalObs) return;
@@ -328,19 +314,42 @@ const MeusClientes = ({ clientes, compras, user, setCompras }) => {
 
   if (detalhe && detCliente) return (
     <div>
-      <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:28, flexWrap:"wrap" }}>
-        <button onClick={() => setDetalhe(null)} style={{ ...gs.btnOutline, padding:"7px 14px", fontSize:12 }}>← Voltar</button>
+      <div style={{ display:"flex", alignItems:"flex-start", gap:12, marginBottom:28, flexWrap:"wrap" }}>
+        <button onClick={() => setDetalhe(null)} style={{ ...gs.btnOutline, padding:"7px 14px", fontSize:12, flexShrink:0 }}>← Voltar</button>
         <div style={{ flex:1 }}>
-          <div style={{ color:C.white, fontSize:20, fontWeight:700 }}>{detCliente.nome}</div>
-          <div style={{ color:C.gray, fontSize:12 }}>{detCliente.categoria||"—"} · Ciclo: {detCliente.ciclo_dias} dias</div>
+          {/* Nome e status */}
+          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:14,flexWrap:"wrap"}}>
+            <div style={{color:C.white,fontSize:22,fontWeight:700}}>{detCliente.nome}</div>
+            <span style={gs.badge(detCliente.status_ativo!==false?C.green:C.red)}>
+              {detCliente.status_ativo!==false?"● Ativo":"● Inativo"}
+            </span>
+            <span style={gs.badge(detCliente.status.cor)}>{detCliente.status.label}</span>
+          </div>
+          {/* Dados cadastrais */}
+          <div style={{...gs.card,marginBottom:16,padding:"20px 24px"}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"16px 40px"}}>
+              <div><label style={gs.label}>Ciclo de Compra</label><div style={{color:C.white,fontSize:14}}>{detCliente.ciclo_dias} dias</div></div>
+              <div><label style={gs.label}>Categoria</label><div style={{color:C.white,fontSize:14}}>{detCliente.categoria||"—"}</div></div>
+              <div><label style={gs.label}>Primeira Compra</label><div style={{color:C.white,fontSize:14}}>{fmtDate(detCliente.data_primeira_compra||detCliente.ultima_compra)}</div></div>
+              <div><label style={gs.label}>Última Compra</label><div style={{color:C.white,fontSize:14}}>{fmtDate(detCliente.ultima_compra)}</div></div>
+              <div><label style={gs.label}>Endereço</label><div style={{color:C.white,fontSize:14}}>{detCliente.endereco||"—"}</div></div>
+              <div><label style={gs.label}>Instagram</label>
+                {detCliente.instagram
+                  ?<a href={detCliente.instagram.startsWith("http")?detCliente.instagram:`https://instagram.com/${detCliente.instagram.replace("@","")}`} target="_blank" rel="noreferrer" style={{color:C.blue,fontSize:14,textDecoration:"none",wordBreak:"break-all"}}>{detCliente.instagram}</a>
+                  :<div style={{color:C.white,fontSize:14}}>—</div>}
+              </div>
+            </div>
+          </div>
         </div>
-        <button style={{ ...gs.btn(C.blue, C.white) }} onClick={() => { setModalCompra(detCliente); setCData(new Date().toISOString().split("T")[0]); }}>+ Registrar Venda</button>
-        <button style={gs.btn()} onClick={() => setModalObs(detCliente)}>+ Observação</button>
+        <div style={{display:"flex",gap:8,flexShrink:0,flexWrap:"wrap"}}>
+          <button style={{...gs.btn(C.blue,C.white)}} onClick={()=>{setModalCompra(detCliente);setCData(new Date().toISOString().split("T")[0]);}}>+ Registrar Venda</button>
+          <button style={gs.btn()} onClick={()=>setModalObs(detCliente)}>+ Observação</button>
+        </div>
       </div>
 
       <div style={{ display:"flex", gap:16, marginBottom:20, flexWrap:"wrap" }}>
-        <StatCard label="Status" value={detCliente.status.label} cor={detCliente.status.cor} sub={`Última compra: ${fmtDate(detCliente.ultima_compra)}`}/>
         <StatCard label="LTV Total" value={fmtMoney(detCliente.ltv)} cor={C.lime} sub={`${detCliente.hist.length} compras`}/>
+        <StatCard label="Última Compra" value={fmtDate(detCliente.ultima_compra)} cor={detCliente.status.cor} sub={detCliente.status.label}/>
         <StatCard label="Ciclo" value={`${detCliente.ciclo_dias}d`} sub="Frequência esperada"/>
       </div>
 
@@ -407,23 +416,15 @@ const MeusClientes = ({ clientes, compras, user, setCompras }) => {
           </div>
         </Modal>
       )}
-      {modalCompra && (
-        <Modal title="Registrar Venda" subtitle={modalCompra.nome} onClose={() => setModalCompra(null)}>
-          <Field label="Data da venda">
-            <input style={gs.input} type="date" value={cData} onChange={e => setCData(e.target.value)}/>
-          </Field>
-          <Field label="Valor (R$)">
-            <input style={gs.input} type="number" value={cValor} onChange={e => setCValor(e.target.value)} placeholder="Ex: 5000"/>
-          </Field>
-          <div style={{ background:"#181B22", borderRadius:8, padding:"10px 14px", marginBottom:12, fontSize:11, color:"#6B7280" }}>
-            ℹ A venda será registrada e atualizará o dashboard e ranking automaticamente.
-          </div>
-          <div style={{ display:"flex", gap:10 }}>
-            <button style={{ ...gs.btnOutline, flex:1 }} onClick={() => setModalCompra(null)}>Cancelar</button>
-            <button style={{ ...gs.btn(), flex:1 }} onClick={addCompra}>Confirmar Venda</button>
-          </div>
-        </Modal>
-      )}
+      {modalVenda && <VendaModal
+        cliente={modalVenda}
+        userId={user?.id}
+        onClose={() => setModalVenda(null)}
+        onSaved={(cp) => {
+          setCompras(p => [cp, ...p]);
+          setModalVenda(null);
+        }}
+      />}
     </div>
   );
 
@@ -460,29 +461,280 @@ const MeusClientes = ({ clientes, compras, user, setCompras }) => {
             </div>
             <div style={{ display:"flex", gap:8, flexShrink:0 }}>
               <button style={{ ...gs.btnOutline, fontSize:11, padding:"6px 12px" }} onClick={() => setModalObs(cl)}>+ Obs</button>
-              <button style={{ ...gs.btn(C.blue, C.white), padding:"6px 12px", fontSize:11 }} onClick={() => { setModalCompra(cl); setCData(new Date().toISOString().split("T")[0]); }}>+ Venda</button>
+              <button style={{ ...gs.btn(C.blue, C.white), padding:"6px 12px", fontSize:11 }} onClick={() => setModalVenda(cl)}>+ Venda</button>
               <button style={{ ...gs.btn(), padding:"6px 14px", fontSize:11 }} onClick={() => setDetalhe(cl.id)}>Ver</button>
             </div>
           </div>
         ))}
       </div>
-    {modalCompra && (
-      <Modal title="Registrar Venda" subtitle={modalCompra.nome} onClose={() => setModalCompra(null)}>
-        <Field label="Data da venda">
-          <input style={gs.input} type="date" value={cData} onChange={e => setCData(e.target.value)}/>
-        </Field>
-        <Field label="Valor (R$)">
-          <input style={gs.input} type="number" value={cValor} onChange={e => setCValor(e.target.value)} placeholder="Ex: 5000"/>
-        </Field>
-        <div style={{ background:"#181B22", borderRadius:8, padding:"10px 14px", marginBottom:12, fontSize:11, color:"#6B7280" }}>
-          ℹ A venda será registrada e atualizará o dashboard, ranking e status do cliente automaticamente.
+    {modalVenda && <VendaModal
+      cliente={modalVenda}
+      userId={user?.id}
+      onClose={() => setModalVenda(null)}
+      onSaved={(cp) => {
+        setCompras(p => [cp, ...p]);
+        setModalVenda(null);
+      }}
+    />}
+    </div>
+  );
+};
+
+
+// ── Minhas Vendas ─────────────────────────────────────
+const MinhasVendas = ({ compras, clientes }) => {
+  const now = new Date();
+  const [filtroMes, setFiltroMes] = useState(now.toISOString().slice(0,7));
+  const [filtroCategoria, setFiltroCategoria] = useState("Todos");
+  const [semFiltroMes, setSemFiltroMes] = useState(false);
+
+  const mesesOpts = Array.from({length:12},(_,i)=>{
+    const d=new Date();d.setMonth(d.getMonth()-i);
+    return{value:d.toISOString().slice(0,7),label:d.toLocaleDateString("pt-BR",{month:"long",year:"numeric"})};
+  });
+
+  const CATEGORIAS_LOCAL = ["Loja de Suplementos","Revendedor","Personal","Supermercado","Farmácia","Nutricionista"];
+
+  const enriched = [...compras]
+    .sort((a,b)=>b.data?.localeCompare(a.data))
+    .map(cp=>{
+      const cl=clientes.find(c=>c.id===cp.cliente_id);
+      return{...cp,cliente:cl};
+    })
+    .filter(cp=>{
+      if(!semFiltroMes&&!cp.data?.startsWith(filtroMes))return false;
+      if(filtroCategoria!=="Todos"&&cp.cliente?.categoria!==filtroCategoria)return false;
+      return true;
+    });
+
+  const total=enriched.reduce((s,c)=>s+Number(c.valor),0);
+  const ticketMedio=enriched.length?total/enriched.length:0;
+
+  return(
+    <div>
+      <div style={{marginBottom:28}}>
+        <div style={{color:C.white,fontSize:22,fontWeight:700,marginBottom:4}}>Minhas Vendas</div>
+        <div style={{color:C.gray,fontSize:13}}>{enriched.length} registros · {fmtMoney(total)}</div>
+      </div>
+
+      <div style={{display:"flex",gap:16,marginBottom:24,flexWrap:"wrap"}}>
+        <StatCard label="Total do Período" value={fmtMoney(total)} cor={C.lime}/>
+        <StatCard label="Qtd Vendas" value={enriched.length} cor={C.blue}/>
+        <StatCard label="Ticket Médio" value={fmtMoney(ticketMedio)} cor={C.yellow}/>
+      </div>
+
+      <div style={{display:"flex",gap:10,marginBottom:20,flexWrap:"wrap",alignItems:"center"}}>
+        <select style={{...gs.select,width:180}} value={filtroMes} onChange={e=>{setFiltroMes(e.target.value);setSemFiltroMes(false);}} disabled={semFiltroMes}>
+          {mesesOpts.map(m=><option key={m.value} value={m.value}>{m.label}</option>)}
+        </select>
+        <select style={{...gs.select,width:160}} value={filtroCategoria} onChange={e=>setFiltroCategoria(e.target.value)}>
+          <option value="Todos">Todas categorias</option>
+          {CATEGORIAS_LOCAL.map(c=><option key={c} value={c}>{c}</option>)}
+        </select>
+        <button onClick={()=>setSemFiltroMes(p=>!p)} style={{
+          ...gs.btn(semFiltroMes?C.lime:C.panel2,semFiltroMes?"#08090C":C.lgray),
+          border:`1px solid ${semFiltroMes?C.lime:C.border}`,fontSize:12,
+        }}>{semFiltroMes?"Filtrado por mês":"Ver tudo"}</button>
+      </div>
+
+      <div style={gs.card}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+          <thead><tr style={{color:C.gray,fontSize:11,textTransform:"uppercase"}}>
+            {["Data","Cliente","Categoria","Valor"].map(h=>(
+              <th key={h} style={{textAlign:"left",padding:"8px 14px",borderBottom:`1px solid ${C.border}`}}>{h}</th>
+            ))}
+          </tr></thead>
+          <tbody>
+            {enriched.length===0?(
+              <tr><td colSpan={4} style={{padding:32,textAlign:"center",color:C.gray}}>Nenhuma venda encontrada no período.</td></tr>
+            ):enriched.map(cp=>(
+              <tr key={cp.id} style={{borderBottom:`1px solid ${C.border}22`}}>
+                <td style={{padding:"11px 14px",color:C.gray}}>{fmtDate(cp.data)}</td>
+                <td style={{padding:"11px 14px",color:C.white,fontWeight:600}}>{cp.cliente?.nome||"—"}</td>
+                <td style={{padding:"11px 14px"}}>
+                  {cp.cliente?.categoria&&<span style={{...gs.badge(C.purple),fontSize:10}}>{cp.cliente.categoria}</span>}
+                </td>
+                <td style={{padding:"11px 14px",color:C.lime,fontWeight:700}}>{fmtMoney(cp.valor)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+// ── Tickets Consultor ─────────────────────────────────
+const TicketsConsultor = ({ user, clientes, compras }) => {
+  const [tickets, setTickets] = useState([]);
+  const [modalNovo, setModalNovo] = useState(false);
+  const [modalDetalhe, setModalDetalhe] = useState(null);
+  const [tTipo, setTTipo] = useState("Valor da compra incorreto");
+  const [tCliente, setTCliente] = useState("");
+  const [tCompra, setTCompra] = useState("");
+  const [tDescricao, setTDescricao] = useState("");
+  const [tLink, setTLink] = useState("");
+  const [tValorErrado, setTValorErrado] = useState("");
+  const [tValorCorreto, setTValorCorreto] = useState("");
+
+  const TIPOS = [
+    "Valor da compra incorreto",
+    "Data da compra incorreta",
+    "Cliente errado",
+    "Ciclo de compra incorreto",
+    "Dados cadastrais incorretos",
+    "Outro",
+  ];
+
+  const STATUS_COR = { aberto:C.red, analise:C.yellow, corrigido:C.green, recusado:C.gray };
+
+  useEffect(()=>{
+    supabase.from("tickets").select("*")
+      .eq("aberto_por_id", user?.id)
+      .order("created_at",{ascending:false})
+      .then(({data})=>setTickets(data||[]));
+  },[user]);
+
+  const comprasCliente = compras.filter(cp=>cp.cliente_id===Number(tCliente)).sort((a,b)=>b.data?.localeCompare(a.data));
+
+  const abrirTicket = async() => {
+    if(!tDescricao||!tCliente)return;
+    const cl = clientes.find(c=>c.id===Number(tCliente));
+    const novo = {
+      tipo:tTipo, cliente_id:Number(tCliente),
+      compra_id:tCompra?Number(tCompra):null,
+      descricao:tDescricao, link_comprovante:tLink,
+      valor_errado:tValorErrado, valor_correto:tValorCorreto,
+      status:"aberto",
+      aberto_por:user?.nome,
+      aberto_por_id:user?.id,
+      aberto_por_perfil:"consultor",
+      aberto_em:new Date().toISOString(),
+      historico:JSON.stringify([{
+        acao:"Ticket aberto",por:user?.nome,
+        perfil:"consultor",em:new Date().toISOString(),
+        detalhe:`Tipo: ${tTipo} | Cliente: ${cl?.nome}`,
+      }]),
+    };
+    const{data}=await supabase.from("tickets").insert(novo).select().single();
+    if(data)setTickets(p=>[data,...p]);
+    setModalNovo(false);
+    setTDescricao("");setTLink("");setTValorErrado("");setTValorCorreto("");setTCliente("");setTCompra("");
+  };
+
+  const detalhe = modalDetalhe ? tickets.find(t=>t.id===modalDetalhe) : null;
+  const fmtDt = iso => iso ? new Date(iso).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}) : "—";
+
+  return(
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:28}}>
+        <div>
+          <div style={{color:C.white,fontSize:22,fontWeight:700,marginBottom:4}}>Meus Tickets</div>
+          <div style={{color:C.gray,fontSize:13}}>Solicitações de correção enviadas ao gestor</div>
         </div>
-        <div style={{ display:"flex", gap:10 }}>
-          <button style={{ ...gs.btnOutline, flex:1 }} onClick={() => setModalCompra(null)}>Cancelar</button>
-          <button style={{ ...gs.btn(), flex:1 }} onClick={addCompra}>Confirmar Venda</button>
+        <button style={gs.btn()} onClick={()=>setModalNovo(true)}>+ Abrir Ticket</button>
+      </div>
+
+      {tickets.length===0?(
+        <div style={{...gs.card,textAlign:"center",padding:48}}>
+          <div style={{fontSize:32,marginBottom:12}}>✓</div>
+          <div style={{color:C.green,fontWeight:700,fontSize:16,marginBottom:6}}>Nenhum ticket aberto</div>
+          <div style={{color:C.gray,fontSize:13}}>Use tickets para solicitar correções ao gestor.</div>
         </div>
-      </Modal>
-    )}
+      ):(
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {tickets.map(t=>{
+            const cl=clientes.find(c=>c.id===t.cliente_id);
+            const cor=STATUS_COR[t.status]||C.gray;
+            return(
+              <div key={t.id} style={{...gs.card,padding:"16px 20px",cursor:"pointer",borderColor:cor+"44"}}
+                onClick={()=>setModalDetalhe(t.id)}>
+                <div style={{display:"flex",alignItems:"flex-start",gap:16,flexWrap:"wrap"}}>
+                  <div style={{flex:1}}>
+                    <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8,flexWrap:"wrap"}}>
+                      <span style={{...gs.badge(cor),fontSize:10}}>{t.status}</span>
+                      <span style={{color:C.white,fontWeight:700,fontSize:14}}>{t.tipo}</span>
+                    </div>
+                    <div style={{color:C.lgray,fontSize:12,marginBottom:6}}>{t.descricao}</div>
+                    <div style={{fontSize:11,color:C.gray}}>
+                      Cliente: <span style={{color:C.lgray}}>{cl?.nome||"—"}</span>
+                    </div>
+                  </div>
+                  <div style={{textAlign:"right",flexShrink:0}}>
+                    <div style={{color:C.gray,fontSize:10}}>{fmtDt(t.aberto_em||t.created_at)}</div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {modalNovo&&(
+        <Modal title="Abrir Ticket" subtitle="Solicite uma correção ao gestor" onClose={()=>setModalNovo(false)}>
+          <Field label="Tipo de erro">
+            <select style={gs.select} value={tTipo} onChange={e=>setTTipo(e.target.value)}>
+              {TIPOS.map(t=><option key={t} value={t}>{t}</option>)}
+            </select>
+          </Field>
+          <Field label="Cliente relacionado">
+            <select style={gs.select} value={tCliente} onChange={e=>{setTCliente(e.target.value);setTCompra("");}}>
+              <option value="">Selecione o cliente...</option>
+              {clientes.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
+            </select>
+          </Field>
+          {tCliente&&comprasCliente.length>0&&(
+            <Field label="Compra relacionada (opcional)">
+              <select style={gs.select} value={tCompra} onChange={e=>setTCompra(e.target.value)}>
+                <option value="">Nenhuma compra específica</option>
+                {comprasCliente.map(cp=><option key={cp.id} value={cp.id}>{fmtDate(cp.data)} — {fmtMoney(cp.valor)}</option>)}
+              </select>
+            </Field>
+          )}
+          {(tTipo==="Valor da compra incorreto")&&(
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <Field label="Valor incorreto"><input style={gs.input} type="number" value={tValorErrado} onChange={e=>setTValorErrado(e.target.value)} placeholder="Ex: 5000"/></Field>
+              <Field label="Valor correto"><input style={gs.input} type="number" value={tValorCorreto} onChange={e=>setTValorCorreto(e.target.value)} placeholder="Ex: 5500"/></Field>
+            </div>
+          )}
+          <Field label="Descrição do erro">
+            <textarea style={{...gs.input,height:80,resize:"vertical"}} value={tDescricao} onChange={e=>setTDescricao(e.target.value)} placeholder="Descreva o que está errado..."/>
+          </Field>
+          <Field label="Link do comprovante (opcional)">
+            <input style={gs.input} value={tLink} onChange={e=>setTLink(e.target.value)} placeholder="https://drive.google.com/..."/>
+          </Field>
+          <div style={{background:C.panel2,borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:11,color:C.gray}}>
+            ℹ O gestor será notificado e fará a correção após análise.
+          </div>
+          <div style={{display:"flex",gap:10}}>
+            <button style={{...gs.btnOutline,flex:1}} onClick={()=>setModalNovo(false)}>Cancelar</button>
+            <button style={{...gs.btn(),flex:1}} onClick={abrirTicket}>Enviar Ticket</button>
+          </div>
+        </Modal>
+      )}
+
+      {detalhe&&(
+        <Modal title={`Ticket — ${detalhe.tipo}`} subtitle={detalhe.descricao} onClose={()=>setModalDetalhe(null)}>
+          <div style={{background:C.panel2,borderRadius:10,padding:"14px 16px",marginBottom:16}}>
+            <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:8}}>
+              <span style={{...gs.badge(STATUS_COR[detalhe.status]||C.gray)}}>{detalhe.status}</span>
+              <span style={{color:C.gray,fontSize:12}}>{fmtDt(detalhe.aberto_em||detalhe.created_at)}</span>
+            </div>
+            {detalhe.valor_errado&&<div style={{fontSize:12,color:C.gray,marginBottom:4}}>Valor errado: <span style={{color:C.red}}>R$ {detalhe.valor_errado}</span></div>}
+            {detalhe.valor_correto&&<div style={{fontSize:12,color:C.gray,marginBottom:4}}>Valor correto: <span style={{color:C.green}}>R$ {detalhe.valor_correto}</span></div>}
+            {detalhe.link_comprovante&&<a href={detalhe.link_comprovante} target="_blank" rel="noreferrer" style={{color:C.blue,fontSize:12}}>🔗 Ver comprovante</a>}
+          </div>
+          {detalhe.correcao&&(
+            <div style={{background:detalhe.status==="corrigido"?C.green+"11":C.red+"11",border:`1px solid ${detalhe.status==="corrigido"?C.green+"44":C.red+"44"}`,borderRadius:10,padding:"14px 16px"}}>
+              <div style={{color:detalhe.status==="corrigido"?C.green:C.red,fontWeight:700,marginBottom:6}}>
+                {detalhe.status==="corrigido"?"✓ Correção aplicada":"✕ Ticket recusado"}
+              </div>
+              <div style={{fontSize:12,color:C.lgray}}>{typeof detalhe.correcao==="string"?JSON.parse(detalhe.correcao)?.justificativa:detalhe.correcao?.justificativa}</div>
+            </div>
+          )}
+          <button style={{...gs.btnOutline,width:"100%",marginTop:16}} onClick={()=>setModalDetalhe(null)}>Fechar</button>
+        </Modal>
+      )}
     </div>
   );
 };
@@ -537,6 +789,8 @@ export default function ConsultorApp({ user, onLogout }) {
       <div style={gs.main}>
         {aba === "carteira" && <MinhaCarteira clientes={clientes} compras={compras} consultorId={consultorId} metas={metas}/>}
         {aba === "clientes" && <MeusClientes clientes={clientes} compras={compras} user={user} setCompras={setCompras}/>}
+        {aba === "vendas" && <MinhasVendas compras={compras} clientes={clientes}/>}
+        {aba === "tickets" && <TicketsConsultor user={user} clientes={clientes} compras={compras}/>}
       </div>
     </div>
   );

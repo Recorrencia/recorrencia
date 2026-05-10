@@ -2,6 +2,8 @@ import { useState, useMemo, useEffect, useCallback } from "react";
 import { supabase } from "./lib/supabase.js";
 import ConsultorApp from "./ConsultorApp.jsx";
 import RankingTV from "./RankingTV.jsx";
+import Marcas from "./Marcas.jsx";
+import VendaModal from "./VendaModal.jsx";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend, ReferenceLine } from "recharts";
 
 const C = {
@@ -140,6 +142,7 @@ const navItems=[
   {id:"alertas",label:"Alertas",icon:"⚠"},
   {id:"ranking",label:"Ranking",icon:"★"},
   {id:"usuarios",label:"Usuários",icon:"⊕"},
+  {id:"marcas",label:"Marcas",icon:"◎"},
   {id:"tickets",label:"Tickets",icon:"✎"},
 ];
 const Sidebar=({aba,setAba,user,onLogout,ticketsAbertos})=>(
@@ -183,7 +186,7 @@ const Sidebar=({aba,setAba,user,onLogout,ticketsAbertos})=>(
 // ══════════════════════════════════════════════════════
 // DASHBOARD
 // ══════════════════════════════════════════════════════
-const Dashboard=({clientes,compras,consultores})=>{
+const Dashboard=({clientes,compras,consultores,compraItens=[]})=>{
   const enriched=clientes.map(cl=>({...cl,status:calcStatus(cl.ultima_compra,cl.ciclo_dias)}));
   const emDia=enriched.filter(c=>c.status.label==="Em dia").length;
   const atencao=enriched.filter(c=>c.status.label==="Atenção").length;
@@ -196,6 +199,51 @@ const Dashboard=({clientes,compras,consultores})=>{
     const total=compras.filter(c=>c.data===ds).reduce((s,c)=>s+Number(c.valor),0);
     return{dia:d.toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"}),total};
   });
+
+  // Analytics de marcas
+  const fatPorMarca = (() => {
+    const map = {};
+    compraItens.forEach(it => {
+      const marca = it.produto?.marca?.nome;
+      if (!marca) return;
+      const mesAtualStr = new Date().toISOString().slice(0,7);
+      const compra = compras.find(c => c.id === it.compra_id);
+      if (!map[marca]) map[marca] = { nome:marca, total:0, mes:0, qtd:0 };
+      map[marca].total += Number(it.valor_unitario||0) * Number(it.quantidade||0);
+      map[marca].qtd += Number(it.quantidade||0);
+      if (compra?.data?.startsWith(mesAtualStr)) map[marca].mes += Number(it.valor_unitario||0) * Number(it.quantidade||0);
+    });
+    return Object.values(map).sort((a,b) => b.total - a.total).slice(0,10);
+  })();
+
+  const fatPorVendedorMarca = (() => {
+    const mesAtualStr = new Date().toISOString().slice(0,7);
+    return consultores.map(con => {
+      const ids = clientes.filter(c => c.consultor_id === con.id).map(c => c.id);
+      const comprasCon = compras.filter(cp => ids.includes(cp.cliente_id) && cp.data?.startsWith(mesAtualStr));
+      const compraIds = comprasCon.map(c => c.id);
+      const total = comprasCon.reduce((s,c) => s+Number(c.valor), 0);
+      return { nome:con.nome.split(" ")[0], total };
+    }).filter(c => c.total > 0).sort((a,b) => b.total - a.total);
+  })();
+
+  // Vendas por mês (últimos 6 meses)
+  const vendasPorMes = Array.from({length:6},(_,i) => {
+    const d = new Date(); d.setMonth(d.getMonth()-(5-i));
+    const m = d.toISOString().slice(0,7);
+    const mes = d.toLocaleDateString("pt-BR",{month:"short"});
+    const total = compras.filter(c => c.data?.startsWith(m)).reduce((s,c)=>s+Number(c.valor),0);
+    return { mes, total:Math.round(total) };
+  });
+
+  // Faturamento por categoria
+  const fatPorCategoria=CATEGORIAS.map(cat=>{
+    const ids=clientes.filter(c=>c.categoria===cat).map(c=>c.id);
+    const total=compras.filter(cp=>ids.includes(cp.cliente_id)).reduce((s,c)=>s+Number(c.valor),0);
+    const mesMes=new Date().toISOString().slice(0,7);
+    const mes=compras.filter(cp=>ids.includes(cp.cliente_id)&&cp.data?.startsWith(mesMes)).reduce((s,c)=>s+Number(c.valor),0);
+    return{cat,total,mes};
+  }).filter(c=>c.total>0).sort((a,b)=>b.total-a.total);
 
   const recMeses=Array.from({length:6},(_,i)=>{
     const d=new Date();d.setMonth(d.getMonth()-(5-i));
@@ -451,6 +499,100 @@ const Dashboard=({clientes,compras,consultores})=>{
         </div>
       </div>
 
+      {/* Faturamento por Categoria */}
+      {fatPorCategoria.length>0&&(
+        <div style={{marginBottom:20}}>
+          <div style={{color:C.white,fontSize:16,fontWeight:700,marginBottom:16}}>Faturamento por Categoria</div>
+          <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap"}}>
+            {fatPorCategoria.map((c,i)=>{
+              const cores=[C.lime,C.blue,C.yellow,C.green,C.red,C.purple];
+              const cor=cores[i%cores.length];
+              return(
+                <div key={c.cat} style={{...gs.card,flex:1,minWidth:140,borderColor:cor+"44"}}>
+                  <div style={{color:C.gray,fontSize:10,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>{c.cat}</div>
+                  <div style={{color:cor,fontSize:20,fontWeight:700,marginBottom:4}}>{fmtMoney(c.total)}</div>
+                  <div style={{color:C.gray,fontSize:11}}>Mês atual: {fmtMoney(c.mes)}</div>
+                </div>
+              );
+            })}
+          </div>
+          <div style={gs.card}>
+            <div style={{color:C.white,fontWeight:700,marginBottom:4,fontSize:14}}>Faturamento por Categoria</div>
+            <div style={{color:C.gray,fontSize:12,marginBottom:16}}>Acumulado histórico</div>
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={fatPorCategoria} margin={{top:10,right:10,left:0,bottom:40}}>
+                <XAxis dataKey="cat" tick={{fill:C.gray,fontSize:11,angle:-20,textAnchor:"end"}} axisLine={false} tickLine={false} interval={0}/>
+                <YAxis tick={{fill:C.gray,fontSize:10}} axisLine={false} tickLine={false} tickFormatter={v=>"R$"+(v/1000).toFixed(0)+"k"}/>
+                <Tooltip
+                  contentStyle={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:8,fontSize:12,color:C.white,fontFamily:"inherit"}}
+                  wrapperStyle={{outline:"none"}}
+                  itemStyle={{color:C.lgray}}
+                  cursor={{fill:C.white,fillOpacity:0.05}}
+                  formatter={v=>[fmtMoney(v),"Total"]}
+                />
+                <Bar dataKey="total" radius={[6,6,0,0]}>
+                  {fatPorCategoria.map((_,i)=>{
+                    const cores=[C.lime,C.blue,C.yellow,C.green,C.red,C.purple];
+                    return<Cell key={i} fill={cores[i%cores.length]}/>;
+                  })}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
+      {/* Vendas por Vendedor e por Mês */}
+      {(fatPorVendedorMarca.length>0||vendasPorMes.length>0)&&(
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,marginBottom:20}}>
+          <div style={gs.card}>
+            <div style={{color:C.white,fontWeight:700,marginBottom:4,fontSize:14}}>Vendas por Vendedor — Mês Atual</div>
+            <div style={{color:C.gray,fontSize:12,marginBottom:16}}>Faturamento individual</div>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={fatPorVendedorMarca} layout="vertical">
+                <XAxis type="number" tick={{fill:C.gray,fontSize:10}} axisLine={false} tickLine={false} tickFormatter={v=>"R$"+(v/1000).toFixed(0)+"k"}/>
+                <YAxis type="category" dataKey="nome" tick={{fill:C.gray,fontSize:10}} axisLine={false} tickLine={false} width={70}/>
+                <Tooltip contentStyle={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:8,fontSize:12,color:C.white,fontFamily:"inherit"}} wrapperStyle={{outline:"none"}} itemStyle={{color:C.lgray}} cursor={{fill:C.white,fillOpacity:0.05}} formatter={v=>[fmtMoney(v),"Vendas"]}/>
+                <Bar dataKey="total" fill={C.lime} radius={[0,4,4,0]}/>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <div style={gs.card}>
+            <div style={{color:C.white,fontWeight:700,marginBottom:4,fontSize:14}}>Vendas por Mês</div>
+            <div style={{color:C.gray,fontSize:12,marginBottom:16}}>Últimos 6 meses</div>
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={vendasPorMes}>
+                <XAxis dataKey="mes" tick={{fill:C.gray,fontSize:11}} axisLine={false} tickLine={false}/>
+                <YAxis tick={{fill:C.gray,fontSize:10}} axisLine={false} tickLine={false} tickFormatter={v=>"R$"+(v/1000).toFixed(0)+"k"}/>
+                <Tooltip contentStyle={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:8,fontSize:12,color:C.white,fontFamily:"inherit"}} wrapperStyle={{outline:"none"}} itemStyle={{color:C.lgray}} cursor={{stroke:C.border,strokeWidth:1}} formatter={v=>[fmtMoney(v),"Total"]}/>
+                <Line type="monotone" dataKey="total" stroke={C.blue} strokeWidth={2.5} dot={{fill:C.blue,r:4,strokeWidth:0}} activeDot={{r:6,fill:C.blue}}/>
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
+      {/* Top Marcas */}
+      {fatPorMarca.length>0&&(
+        <div style={{...gs.card,marginBottom:20}}>
+          <div style={{color:C.white,fontWeight:700,marginBottom:4,fontSize:14}}>Top Marcas por Faturamento</div>
+          <div style={{color:C.gray,fontSize:12,marginBottom:16}}>Acumulado histórico — top 10</div>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={fatPorMarca} margin={{top:10,right:10,left:0,bottom:40}}>
+              <XAxis dataKey="nome" tick={{fill:C.gray,fontSize:10,angle:-20,textAnchor:"end"}} axisLine={false} tickLine={false} interval={0}/>
+              <YAxis tick={{fill:C.gray,fontSize:10}} axisLine={false} tickLine={false} tickFormatter={v=>"R$"+(v/1000).toFixed(0)+"k"}/>
+              <Tooltip contentStyle={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:8,fontSize:12,color:C.white,fontFamily:"inherit"}} wrapperStyle={{outline:"none"}} itemStyle={{color:C.lgray}} cursor={{fill:C.white,fillOpacity:0.05}} formatter={(v,n)=>[fmtMoney(v),n==="total"?"Total":"Mês atual"]}/>
+              <Bar dataKey="total" name="total" fill={C.purple} radius={[6,6,0,0]}/>
+              <Bar dataKey="mes" name="mes" fill={C.lime} radius={[6,6,0,0]}/>
+            </BarChart>
+          </ResponsiveContainer>
+          <div style={{display:"flex",gap:16,marginTop:8}}>
+            <div style={{display:"flex",alignItems:"center",gap:6,fontSize:11}}><div style={{width:12,height:12,borderRadius:3,background:C.purple}}/><span style={{color:C.gray}}>Total histórico</span></div>
+            <div style={{display:"flex",alignItems:"center",gap:6,fontSize:11}}><div style={{width:12,height:12,borderRadius:3,background:C.lime}}/><span style={{color:C.gray}}>Mês atual</span></div>
+          </div>
+        </div>
+      )}
+
       {/* Recorrência por mês */}
       <div style={gs.card}>
         <div style={{color:C.white,fontWeight:700,marginBottom:4,fontSize:14}}>Recorrência por Mês</div>
@@ -479,6 +621,7 @@ const Clientes=({clientes,setClientes,consultores,compras,setCompras,user,observ
   const[filtroCategoria,setFiltroCategoria]=useState("Todos");
   const[busca,setBusca]=useState("");
   const[modalCompra,setModalCompra]=useState(null);
+  const[modalVenda,setModalVenda]=useState(null);
   const[modalTransf,setModalTransf]=useState(null);
   const[modalObs,setModalObs]=useState(null);
   const[modalNovoCliente,setModalNovoCliente]=useState(false);
@@ -488,6 +631,8 @@ const Clientes=({clientes,setClientes,consultores,compras,setCompras,user,observ
   const[ncCiclo,setNcCiclo]=useState(30);
   const[ncValor,setNcValor]=useState("");
   const[ncCategoria,setNcCategoria]=useState("");
+  const[ncInstagram,setNcInstagram]=useState("");
+  const[ncEndereco,setNcEndereco]=useState("");
   const[cData,setCData]=useState(today());
   const[cValor,setCValor]=useState("");
   const[tConsultor,setTConsultor]=useState("");
@@ -519,6 +664,9 @@ const Clientes=({clientes,setClientes,consultores,compras,setCompras,user,observ
     const{data:novo,error}=await supabase.from("clientes").insert({
       nome:ncNome,consultor_id:Number(ncConsultor),setor,ciclo_dias:ncCiclo,
       categoria:ncCategoria||null,
+      instagram:ncInstagram||null,
+      endereco:ncEndereco||null,
+      data_primeira_compra:ncValor?today():null,
       ultima_compra:ncValor?today():null
     }).select().single();
     if(error){alert("Erro ao cadastrar cliente: "+error.message);return;}
@@ -579,12 +727,48 @@ const Clientes=({clientes,setClientes,consultores,compras,setCompras,user,observ
         <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:28,flexWrap:"wrap"}}>
           <button onClick={()=>setDetalhe(null)} style={{...gs.btnOutline,padding:"7px 14px",fontSize:12}}>← Voltar</button>
           <div style={{flex:1}}>
-            <div style={{color:C.white,fontSize:20,fontWeight:700}}>{detCliente.nome}</div>
-            <div style={{color:C.gray,fontSize:12}}>{detCliente.setor} · {detCliente.consultor?.nome} · Ciclo: {detCliente.ciclo_dias} dias</div>
+            <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:16,flexWrap:"wrap"}}>
+              <div style={{color:C.white,fontSize:22,fontWeight:700}}>{detCliente.nome}</div>
+              <span style={gs.badge(detCliente.status_ativo!==false?C.green:C.red)}>{detCliente.status_ativo!==false?"● Ativo":"● Inativo"}</span>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:"10px 24px"}}>
+              {[
+                {label:"Consultor Responsável",value:detCliente.consultor?.nome},
+                {label:"Setor",value:detCliente.setor},
+                {label:"Ciclo de Compra",value:`${detCliente.ciclo_dias} dias`},
+                {label:"Categoria",value:detCliente.categoria},
+                {label:"Data da Primeira Compra",value:fmtDate(detCliente.data_primeira_compra||detCliente.ultima_compra)},
+                {label:"Data da Última Compra",value:fmtDate(detCliente.ultima_compra)},
+                {label:"Endereço",value:detCliente.endereco},
+              ].filter(f=>f.value).map(f=>(
+                <div key={f.label}>
+                  <div style={{color:C.gray,fontSize:10,textTransform:"uppercase",letterSpacing:0.5,marginBottom:2}}>{f.label}</div>
+                  <div style={{color:C.white,fontSize:13,fontWeight:500}}>{f.value}</div>
+                </div>
+              ))}
+              {detCliente.instagram&&(
+                <div>
+                  <div style={{color:C.gray,fontSize:10,textTransform:"uppercase",letterSpacing:0.5,marginBottom:2}}>Instagram</div>
+                  <a href={detCliente.instagram.startsWith("http")?detCliente.instagram:`https://instagram.com/${detCliente.instagram.replace("@","")}`}
+                    target="_blank" rel="noreferrer"
+                    style={{color:C.blue,fontSize:13,textDecoration:"none",fontWeight:500}}>
+                    {detCliente.instagram}
+                  </a>
+                </div>
+              )}
+            </div>
           </div>
-          <div style={{display:"flex",gap:10}}>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+            <button style={gs.btn(detCliente.status_ativo!==false?C.red:C.green,C.white)}
+              onClick={async()=>{
+                const novoStatus=detCliente.status_ativo===false?true:false;
+                await supabase.from("clientes").update({status_ativo:novoStatus}).eq("id",detCliente.id);
+                setClientes(p=>p.map(c=>c.id===detCliente.id?{...c,status_ativo:novoStatus}:c));
+              }}>
+              {detCliente.status_ativo!==false?"Marcar Inativo":"Marcar Ativo"}
+            </button>
             <button style={gs.btn(C.blue,C.white)} onClick={()=>{setModalTransf(detCliente);setTSetor(detCliente.setor);setTConsultor(String(detCliente.consultor_id));}}>Transferir</button>
-            <button style={gs.btn()} onClick={()=>{setModalCompra(detCliente);setCData(today());}}>+ Registrar Compra</button>
+            <button style={gs.btn()} onClick={()=>setModalVenda(detCliente)}>+ Registrar Venda</button>
           </div>
         </div>
         <div style={{display:"flex",gap:16,marginBottom:20,flexWrap:"wrap"}}>
@@ -635,28 +819,46 @@ const Clientes=({clientes,setClientes,consultores,compras,setCompras,user,observ
         </div>
         <div style={gs.card}>
           <div style={{color:C.white,fontWeight:700,marginBottom:16,fontSize:14}}>Histórico de Compras</div>
-          <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
-            <thead><tr style={{color:C.gray,fontSize:11,textTransform:"uppercase"}}>
-              {["Data","Valor"].map(h=><th key={h} style={{textAlign:"left",padding:"6px 12px",borderBottom:`1px solid ${C.border}`}}>{h}</th>)}
-            </tr></thead>
-            <tbody>
-              {[...detCliente.hist].sort((a,b)=>b.data?.localeCompare(a.data)).map(cp=>(
-                <tr key={cp.id} style={{borderBottom:`1px solid ${C.border}22`}}>
-                  <td style={{padding:"10px 12px",color:C.lgray}}>{fmtDate(cp.data)}</td>
-                  <td style={{padding:"10px 12px",color:C.lime,fontWeight:700}}>{fmtMoney(cp.valor)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          {[...detCliente.hist].sort((a,b)=>b.data?.localeCompare(a.data)).map(cp=>{
+            const itens=(compraItens||[]).filter(it=>it.compra_id===cp.id);
+            return(
+              <div key={cp.id} style={{borderBottom:`1px solid ${C.border}33`,paddingBottom:12,marginBottom:12}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:itens.length>0?8:0}}>
+                  <span style={{color:C.lgray,fontSize:13}}>{fmtDate(cp.data)}</span>
+                  <span style={{color:C.lime,fontWeight:700,fontSize:14}}>{fmtMoney(cp.valor)}</span>
+                </div>
+                {itens.length>0&&(
+                  <div style={{display:"flex",flexDirection:"column",gap:4,marginTop:6}}>
+                    {itens.map(it=>(
+                      <div key={it.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:C.panel2,borderRadius:6,padding:"6px 10px",fontSize:12}}>
+                        <div>
+                          <span style={{color:C.purple,fontWeight:700,marginRight:8}}>{it.produto?.marca?.nome}</span>
+                          <span style={{color:C.lgray}}>{it.produto?.nome}</span>
+                        </div>
+                        <div style={{display:"flex",gap:12,alignItems:"center"}}>
+                          <span style={{color:C.gray}}>{it.quantidade} {it.produto?.unidade}</span>
+                          <span style={{color:C.white,fontWeight:600}}>{fmtMoney(it.valor_unitario)}/un</span>
+                          <span style={{color:C.lime,fontWeight:700}}>{fmtMoney(it.quantidade*it.valor_unitario)}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
-        {modalCompra&&<Modal title="Registrar Compra" subtitle={modalCompra.nome} onClose={()=>setModalCompra(null)}>
-          <Field label="Data da compra"><input style={gs.input} type="date" value={cData} onChange={e=>setCData(e.target.value)}/></Field>
-          <Field label="Valor (R$)"><input style={gs.input} type="number" value={cValor} onChange={e=>setCValor(e.target.value)} placeholder="0,00"/></Field>
-          <div style={{display:"flex",gap:10,marginTop:8}}>
-            <button style={{...gs.btnOutline,flex:1}} onClick={()=>setModalCompra(null)}>Cancelar</button>
-            <button style={{...gs.btn(),flex:1}} onClick={addCompra}>Confirmar</button>
-          </div>
-        </Modal>}
+        {modalVenda&&<VendaModal
+          cliente={modalVenda}
+          userId={user?.id}
+          onClose={()=>setModalVenda(null)}
+          onSaved={(cp)=>{
+            setCompras(p=>[cp,...p]);
+            setClientes(p=>p.map(c=>c.id===modalVenda.id?{...c,ultima_compra:cp.data}:c));
+            setModalVenda(null);
+            loadData();
+          }}
+        />}
         {modalTransf&&<Modal title="Transferir Cliente" subtitle={modalTransf.nome} onClose={()=>setModalTransf(null)}>
           <Field label="Setor destino"><select style={gs.select} value={tSetor} onChange={e=>setTSetor(e.target.value)}><option>Farm</option><option>1ª Compra</option></select></Field>
           <Field label="Consultor destino"><select style={gs.select} value={tConsultor} onChange={e=>setTConsultor(e.target.value)}>{consultores.filter(c=>c.setor===tSetor).map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}</select></Field>
@@ -729,7 +931,7 @@ const Clientes=({clientes,setClientes,consultores,compras,setCompras,user,observ
             <div style={{display:"flex",gap:8,flexShrink:0}}>
               <button style={{...gs.btnOutline,fontSize:11,padding:"6px 12px"}} onClick={()=>setModalObs(cl)}>Obs</button>
               <button style={{...gs.btn(C.panel2,C.lgray),fontSize:11,padding:"6px 12px",border:`1px solid ${C.border}`}} onClick={()=>{setModalTransf(cl);setTSetor(cl.setor);setTConsultor(String(cl.consultor_id));}}>Transferir</button>
-              <button style={{...gs.btn(),padding:"6px 14px",fontSize:11}} onClick={()=>{setModalCompra(cl);setCData(today());}}>+ Compra</button>
+              <button style={{...gs.btn(),padding:"6px 14px",fontSize:11}} onClick={()=>setModalVenda(cl)}>+ Venda</button>
             </div>
           </div>
         ))}
@@ -744,6 +946,8 @@ const Clientes=({clientes,setClientes,consultores,compras,setCompras,user,observ
           </select>
         </Field>
         <Field label="Ciclo de compra"><select style={gs.select} value={ncCiclo} onChange={e=>setNcCiclo(Number(e.target.value))}>{[15,30,45,60].map(d=><option key={d} value={d}>{d} dias</option>)}</select></Field>
+        <Field label="Instagram (opcional)"><input style={gs.input} value={ncInstagram} onChange={e=>setNcInstagram(e.target.value)} placeholder="@perfil ou URL"/></Field>
+        <Field label="Endereço (opcional)"><input style={gs.input} value={ncEndereco} onChange={e=>setNcEndereco(e.target.value)} placeholder="Cidade, Estado"/></Field>
         <Field label="Valor da 1ª compra (opcional)"><input style={gs.input} type="number" value={ncValor} onChange={e=>setNcValor(e.target.value)} placeholder="R$ 0,00"/></Field>
         <div style={{display:"flex",gap:10,marginTop:8}}>
           <button style={{...gs.btnOutline,flex:1}} onClick={()=>setModalNovoCliente(false)}>Cancelar</button>
@@ -2037,6 +2241,7 @@ export default function App(){
   const[observacoes,setObservacoes]=useState({});
   const[tickets,setTickets]=useState([]);
   const[metas,setMetas]=useState([]);
+  const[compraItens,setCompraItens]=useState([]);
   const[loadingData,setLoadingData]=useState(false);
   const[sessionChecked,setSessionChecked]=useState(false);
 
@@ -2080,6 +2285,7 @@ export default function App(){
   },[]);
 
   // Load data from Supabase
+  // eslint-disable-next-line
   const loadData=useCallback(async()=>{
     if(!user)return;
     setLoadingData(true);
@@ -2091,6 +2297,7 @@ export default function App(){
         supabase.from("observacoes").select("*").order("created_at",{ascending:false}),
         supabase.from("tickets").select("*").order("created_at",{ascending:false}),
         supabase.from("metas").select("*"),
+      supabase.from("compra_itens").select("*,produto:produtos(id,nome,unidade,marca:marcas(id,nome))"),
       ]);
       setConsultores(r1.data||[]);
       setClientes(r2.data||[]);
@@ -2130,13 +2337,14 @@ export default function App(){
       <div style={gs.main}>
         {(()=>{
           switch(aba){
-            case"dashboard":return<Dashboard clientes={clientes} compras={compras} consultores={consultores}/>;
+            case"dashboard":return<Dashboard clientes={clientes} compras={compras} consultores={consultores} compraItens={compraItens}/>;
             case"clientes":return<Clientes clientes={clientes} setClientes={setClientes} consultores={consultores} compras={compras} setCompras={setCompras} user={user} observacoes={observacoes} setObservacoes={setObservacoes}/>;
             case"consultores":return<Consultores consultores={consultores} clientes={clientes} compras={compras}/>;
             case"compras":return<Compras compras={compras} clientes={clientes} consultores={consultores}/>;
             case"ltv":return<LTV clientes={clientes} compras={compras} consultores={consultores}/>;
             case"alertas":return<Alertas clientes={clientes} compras={compras} consultores={consultores} observacoes={observacoes}/>;
             case"ranking":return<Ranking clientes={clientes} compras={compras} consultores={consultores} metas={metas}/>;
+            case"marcas":return<Marcas/>;
             case"usuarios":return<Usuarios consultores={consultores} setConsultores={setConsultores} metas={metas} setMetas={setMetas}/>;
             case"tickets":return<Tickets tickets={tickets} setTickets={setTickets} clientes={clientes} compras={compras} setCompras={setCompras} setClientes={setClientes} user={user} consultores={consultores}/>;
             default:return null;
