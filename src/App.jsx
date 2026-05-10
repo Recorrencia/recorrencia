@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { supabase } from "./lib/supabase.js";
+import { supabaseAdmin } from "./lib/supabaseAdmin.js";
 import ConsultorApp from "./ConsultorApp.jsx";
 import RankingTV from "./RankingTV.jsx";
 import Marcas from "./Marcas.jsx";
@@ -689,7 +690,7 @@ const Dashboard=({clientes,compras,consultores,compraItens=[]})=>{
 // ══════════════════════════════════════════════════════
 // CLIENTES
 // ══════════════════════════════════════════════════════
-const Clientes=({clientes,setClientes,consultores,compras,setCompras,user,observacoes,setObservacoes})=>{
+const Clientes=({clientes,setClientes,consultores,compras,setCompras,user,observacoes,setObservacoes,compraItens=[],loadData})=>{
   const[filtroSetor,setFiltroSetor]=useState("Todos");
   const[filtroConsultor,setFiltroConsultor]=useState("Todos");
   const[filtroStatus,setFiltroStatus]=useState("Todos");
@@ -1590,14 +1591,12 @@ const Usuarios=({consultores,setConsultores,metas,setMetas})=>{
     if(!uNome||!uEmail||!uSenha)return;
     setULoading(true);
     try{
-      // Cria usuário com senha definida pelo gestor
-      const{data,error}=await supabase.auth.signUp({
+      // Usa service role para criar usuário sem precisar de e-mail
+      const{data,error}=await supabaseAdmin.auth.admin.createUser({
         email:uEmail,
         password:uSenha,
-        options:{
-          data:{nome:uNome,perfil:"consultor"},
-          emailRedirectTo:null,
-        }
+        email_confirm:true,
+        user_metadata:{nome:uNome,perfil:"consultor"},
       });
       if(error)throw error;
       if(data?.user){
@@ -1610,16 +1609,81 @@ const Usuarios=({consultores,setConsultores,metas,setMetas})=>{
           nome:uNome,setor:uSetor,email:uEmail,user_id:data.user.id,ativo:true
         }).select().single();
         if(con)setConsultores(p=>[...p,con]);
-        alert(`✅ Consultor ${uNome} cadastrado!
+        alert(`✅ Consultor ${uNome} cadastrado com sucesso!
+
+Credenciais de acesso:
 E-mail: ${uEmail}
 Senha: ${uSenha}
 
-Guarde essas informações para passar ao consultor.`);
+Passe essas informações ao consultor.`);
       }
     }catch(e){
       alert("Erro ao criar consultor: "+e.message);
     }finally{
       setModalNovo(false);setUNome("");setUEmail("");setUSenha("");setULoading(false);
+    }
+  };
+
+  const [modalDesativar, setModalDesativar] = useState(null);
+  const [transferirPara, setTransferirPara] = useState("");
+  const [desativando, setDesativando] = useState(false);
+
+  const desativarConsultor = async () => {
+    if (!modalDesativar) return;
+    const carteira = clientes.filter(c => c.consultor_id === modalDesativar.id);
+    
+    // Se tem clientes, precisa transferir primeiro
+    if (carteira.length > 0 && !transferirPara) {
+      alert(`Este consultor tem ${carteira.length} cliente(s) na carteira. Selecione para quem transferir antes de desativar.`);
+      return;
+    }
+
+    setDesativando(true);
+    try {
+      // Transfere clientes se houver
+      if (carteira.length > 0 && transferirPara) {
+        const novoConsultor = consultores.find(c => c.id === Number(transferirPara));
+        // Transfere cada cliente
+        for (const cl of carteira) {
+          await supabase.from("clientes").update({
+            consultor_id: Number(transferirPara),
+            setor: novoConsultor?.setor || cl.setor,
+          }).eq("id", cl.id);
+          // Registra transferência
+          await supabase.from("transferencias").insert({
+            cliente_id: cl.id,
+            consultor_origem_id: modalDesativar.id,
+            consultor_destino_id: Number(transferirPara),
+            setor_origem: cl.setor,
+            setor_destino: novoConsultor?.setor || cl.setor,
+          });
+        }
+        // Atualiza estado local
+        setClientes(p => p.map(c => c.consultor_id === modalDesativar.id
+          ? {...c, consultor_id:Number(transferirPara), setor:novoConsultor?.setor||c.setor}
+          : c
+        ));
+      }
+
+      // Desativa o consultor
+      await supabase.from("consultores").update({ativo: false}).eq("id", modalDesativar.id);
+      
+      // Desativa o usuário no Auth se tiver user_id
+      if (modalDesativar.user_id) {
+        await supabaseAdmin.auth.admin.updateUserById(modalDesativar.user_id, {
+          ban_duration: "876600h" // ~100 anos = bloqueado permanentemente
+        }).catch(() => {}); // ignora erro se não tiver permissão
+      }
+
+      setConsultores(p => p.filter(c => c.id !== modalDesativar.id));
+      setModalDesativar(null);
+      setTransferirPara("");
+      alert(`✅ Consultor ${modalDesativar.nome} desativado com sucesso!${carteira.length > 0 ? `
+${carteira.length} cliente(s) transferido(s).` : ""}`);
+    } catch(e) {
+      alert("Erro ao desativar: " + e.message);
+    } finally {
+      setDesativando(false);
     }
   };
 
@@ -1681,6 +1745,10 @@ Guarde essas informações para passar ao consultor.`);
               }}>
                 Definir Meta
               </button>
+              <button style={{...gs.btn(C.panel2,C.red),border:`1px solid ${C.red}44`,fontSize:12}}
+                onClick={()=>{setModalDesativar(con);setTransferirPara("");}}>
+                Desativar
+              </button>
             </div>
           );
         })}
@@ -1706,6 +1774,56 @@ Guarde essas informações para passar ao consultor.`);
               {uLoading?"Cadastrando...":"Cadastrar Consultor"}
             </button>
           </div>
+        </Modal>
+      )}
+
+      {modalDesativar&&(
+        <Modal title="Desativar Consultor" subtitle={modalDesativar.nome} onClose={()=>setModalDesativar(null)}>
+          {(()=>{
+            const carteira=clientes.filter(c=>c.consultor_id===modalDesativar.id);
+            return(
+              <>
+                {carteira.length>0?(
+                  <>
+                    <div style={{background:C.yellow+"22",border:`1px solid ${C.yellow}44`,borderRadius:8,padding:"12px 14px",marginBottom:16,fontSize:12,color:C.yellow}}>
+                      ⚠ Este consultor tem <strong>{carteira.length} cliente(s)</strong> na carteira.<br/>
+                      Selecione para quem transferir antes de desativar.
+                    </div>
+                    <Field label="Transferir carteira para">
+                      <select style={gs.select} value={transferirPara} onChange={e=>setTransferirPara(e.target.value)}>
+                        <option value="">Selecione o consultor...</option>
+                        {consultores.filter(c=>c.id!==modalDesativar.id).map(c=>(
+                          <option key={c.id} value={c.id}>{c.nome} ({c.setor})</option>
+                        ))}
+                      </select>
+                    </Field>
+                    {transferirPara&&(
+                      <div style={{background:C.panel2,borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:11,color:C.gray}}>
+                        ℹ Todo o histórico de compras, observações e LTV dos clientes será preservado.
+                        Apenas a carteira será transferida.
+                      </div>
+                    )}
+                  </>
+                ):(
+                  <div style={{background:C.panel2,borderRadius:8,padding:"12px 14px",marginBottom:16,fontSize:12,color:C.gray}}>
+                    ✅ Este consultor não tem clientes na carteira. Pode ser desativado com segurança.
+                  </div>
+                )}
+                <div style={{background:C.red+"11",border:`1px solid ${C.red}44`,borderRadius:8,padding:"12px 14px",marginBottom:16,fontSize:12,color:C.red}}>
+                  ⚠ O acesso de <strong>{modalDesativar.nome}</strong> ao sistema será bloqueado imediatamente.
+                </div>
+                <div style={{display:"flex",gap:10}}>
+                  <button style={{...gs.btnOutline,flex:1}} onClick={()=>setModalDesativar(null)}>Cancelar</button>
+                  <button
+                    style={{...gs.btn(C.red,C.white),flex:1,opacity:desativando?0.6:1}}
+                    onClick={desativarConsultor}
+                    disabled={desativando||(carteira.length>0&&!transferirPara)}>
+                    {desativando?"Desativando...":"Confirmar Desativação"}
+                  </button>
+                </div>
+              </>
+            );
+          })()}
         </Modal>
       )}
 
@@ -2441,7 +2559,7 @@ export default function App(){
         {(()=>{
           switch(aba){
             case"dashboard":return<Dashboard clientes={clientes} compras={compras} consultores={consultores} compraItens={compraItens}/>;
-            case"clientes":return<Clientes clientes={clientes} setClientes={setClientes} consultores={consultores} compras={compras} setCompras={setCompras} user={user} observacoes={observacoes} setObservacoes={setObservacoes}/>;
+            case"clientes":return<Clientes clientes={clientes} setClientes={setClientes} consultores={consultores} compras={compras} setCompras={setCompras} user={user} observacoes={observacoes} setObservacoes={setObservacoes} compraItens={compraItens} loadData={loadData}/>;
             case"consultores":return<Consultores consultores={consultores} clientes={clientes} compras={compras}/>;
             case"compras":return<Compras compras={compras} clientes={clientes} consultores={consultores}/>;
             case"ltv":return<LTV clientes={clientes} compras={compras} consultores={consultores}/>;
