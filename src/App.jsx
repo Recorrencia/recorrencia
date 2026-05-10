@@ -77,8 +77,83 @@ const Modal=({title,subtitle,onClose,children})=>(
   </div>
 );
 
+
 // ══════════════════════════════════════════════════════
-// LOGIN — modo demo (sem Supabase)
+// DEFINIR SENHA (convite / reset)
+// ══════════════════════════════════════════════════════
+const DefinirSenha=({accessToken,refreshToken})=>{
+  const[senha,setSenha]=useState("");
+  const[confirmar,setConfirmar]=useState("");
+  const[loading,setLoading]=useState(false);
+  const[erro,setErro]=useState("");
+  const[ok,setOk]=useState(false);
+
+  const handle=async()=>{
+    if(senha.length<6){setErro("A senha deve ter pelo menos 6 caracteres.");return;}
+    if(senha!==confirmar){setErro("As senhas não coincidem.");return;}
+    setLoading(true);setErro("");
+    try{
+      // Seta a sessão com os tokens do convite
+      const{error:sessionError}=await supabase.auth.setSession({
+        access_token:accessToken,
+        refresh_token:refreshToken||accessToken,
+      });
+      if(sessionError)throw sessionError;
+      // Atualiza a senha
+      const{error}=await supabase.auth.updateUser({password:senha});
+      if(error)throw error;
+      setOk(true);
+      // Limpa o hash da URL
+      window.history.replaceState(null,"",window.location.pathname);
+      setTimeout(()=>window.location.reload(),2000);
+    }catch(e){
+      setErro("Erro ao definir senha: "+e.message);
+    }finally{
+      setLoading(false);
+    }
+  };
+
+  return(
+    <div style={{minHeight:"100vh",background:C.dark,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'DM Mono',monospace"}}>
+      <div style={{width:400}}>
+        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:40}}>
+          <div style={{width:40,height:40,background:C.lime,borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,color:C.dark,fontSize:20}}>R</div>
+          <div>
+            <div style={{color:C.white,fontWeight:700,fontSize:18}}>RecorrênciaOS</div>
+            <div style={{color:C.gray,fontSize:11}}>Definir senha de acesso</div>
+          </div>
+        </div>
+        <div style={{...gs.card,padding:32}}>
+          {ok?(
+            <div style={{textAlign:"center"}}>
+              <div style={{fontSize:40,marginBottom:16}}>✅</div>
+              <div style={{color:C.green,fontWeight:700,fontSize:18,marginBottom:8}}>Senha definida!</div>
+              <div style={{color:C.gray,fontSize:13}}>Redirecionando para o sistema...</div>
+            </div>
+          ):(
+            <>
+              <div style={{color:C.white,fontWeight:700,fontSize:20,marginBottom:4}}>Criar sua senha</div>
+              <div style={{color:C.gray,fontSize:12,marginBottom:28}}>Defina uma senha para acessar o sistema</div>
+              {erro&&<div style={{background:C.red+"22",border:`1px solid ${C.red}55`,borderRadius:8,padding:"10px 14px",color:C.red,fontSize:12,marginBottom:16}}>{erro}</div>}
+              <Field label="Nova senha">
+                <input style={gs.input} type="password" value={senha} onChange={e=>setSenha(e.target.value)} placeholder="Mínimo 6 caracteres"/>
+              </Field>
+              <Field label="Confirmar senha">
+                <input style={gs.input} type="password" value={confirmar} onChange={e=>setConfirmar(e.target.value)} placeholder="Repita a senha" onKeyDown={e=>e.key==="Enter"&&handle()}/>
+              </Field>
+              <button style={{...gs.btn(),width:"100%",marginTop:8,padding:"11px 18px",opacity:loading?0.6:1}} onClick={handle} disabled={loading}>
+                {loading?"Salvando...":"Confirmar Senha"}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ══════════════════════════════════════════════════════
+// LOGIN
 // ══════════════════════════════════════════════════════
 const USERS_DEMO=[
   {id:"1",email:"gestor@recorrencia.com",pass:"gestor123",nome:"Carlos Gestor",perfil:"Gerente"},
@@ -1514,31 +1589,38 @@ const Usuarios=({consultores,setConsultores,metas,setMetas})=>{
   const criarUsuario=async()=>{
     if(!uNome||!uEmail||!uSenha)return;
     setULoading(true);
-    // 1. Criar usuário no Supabase Auth via API
-    const{data,error}=await supabase.auth.admin?.createUser({
-      email:uEmail,password:uSenha,
-      email_confirm:true,
-      user_metadata:{nome:uNome},
-    }).catch(()=>({data:null,error:{message:"Sem permissão admin"}}));
+    try{
+      // Cria usuário com senha definida pelo gestor
+      const{data,error}=await supabase.auth.signUp({
+        email:uEmail,
+        password:uSenha,
+        options:{
+          data:{nome:uNome,perfil:"consultor"},
+          emailRedirectTo:null,
+        }
+      });
+      if(error)throw error;
+      if(data?.user){
+        // Insere perfil
+        await supabase.from("perfis").insert({
+          id:data.user.id,nome:uNome,perfil:"consultor"
+        });
+        // Vincula ao consultor
+        const{data:con}=await supabase.from("consultores").insert({
+          nome:uNome,setor:uSetor,email:uEmail,user_id:data.user.id,ativo:true
+        }).select().single();
+        if(con)setConsultores(p=>[...p,con]);
+        alert(`✅ Consultor ${uNome} cadastrado!
+E-mail: ${uEmail}
+Senha: ${uSenha}
 
-    if(error){
-      // Fallback: cria apenas o consultor com email para referência
-      const{data:con}=await supabase.from("consultores").insert({
-        nome:uNome,setor:uSetor,email:uEmail,ativo:true
-      }).select().single();
-      if(con)setConsultores(p=>[...p,con]);
-      alert(`Consultor cadastrado! Para criar o login, adicione o usuário manualmente no Supabase Auth com e-mail: ${uEmail}`);
-    } else if(data?.user){
-      // Insert perfil
-      await supabase.from("perfis").insert({id:data.user.id,nome:uNome,perfil:"consultor"});
-      // Insert ou update consultor vinculado ao user_id
-      const{data:con}=await supabase.from("consultores").insert({
-        nome:uNome,setor:uSetor,email:uEmail,user_id:data.user.id,ativo:true
-      }).select().single();
-      if(con)setConsultores(p=>[...p,con]);
-      alert(`Usuário ${uNome} criado com sucesso!`);
+Guarde essas informações para passar ao consultor.`);
+      }
+    }catch(e){
+      alert("Erro ao criar consultor: "+e.message);
+    }finally{
+      setModalNovo(false);setUNome("");setUEmail("");setUSenha("");setULoading(false);
     }
-    setModalNovo(false);setUNome("");setUEmail("");setUSenha("");setULoading(false);
   };
 
   const salvarMeta=async()=>{
@@ -1608,19 +1690,20 @@ const Usuarios=({consultores,setConsultores,metas,setMetas})=>{
         <Modal title="Novo Consultor" subtitle="Cria o acesso e vincula ao setor" onClose={()=>setModalNovo(false)}>
           <Field label="Nome completo"><input style={gs.input} value={uNome} onChange={e=>setUNome(e.target.value)} placeholder="Ex: Ana Paula"/></Field>
           <Field label="E-mail de acesso"><input style={gs.input} type="email" value={uEmail} onChange={e=>setUEmail(e.target.value)} placeholder="consultor@email.com"/></Field>
-          <Field label="Senha inicial"><input style={gs.input} type="password" value={uSenha} onChange={e=>setUSenha(e.target.value)} placeholder="Mínimo 6 caracteres"/></Field>
+          <Field label="Senha inicial"><input style={gs.input} type="text" value={uSenha} onChange={e=>setUSenha(e.target.value)} placeholder="Mínimo 6 caracteres"/></Field>
           <Field label="Setor">
             <select style={gs.select} value={uSetor} onChange={e=>setUSetor(e.target.value)}>
               <option>Farm</option><option>1ª Compra</option>
             </select>
           </Field>
-          <div style={{background:C.panel2,borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:11,color:C.gray}}>
-            ℹ O consultor receberá acesso apenas à própria carteira.
+          <div style={{background:C.panel2,borderRadius:8,padding:"12px 14px",marginBottom:12,fontSize:11,color:C.gray,lineHeight:1.6}}>
+            ℹ O gestor define a senha inicial e passa as credenciais ao consultor pessoalmente.<br/>
+            <span style={{color:C.lgray}}>O consultor verá apenas a própria carteira.</span>
           </div>
           <div style={{display:"flex",gap:10}}>
             <button style={{...gs.btnOutline,flex:1}} onClick={()=>setModalNovo(false)}>Cancelar</button>
             <button style={{...gs.btn(),flex:1,opacity:uLoading?0.6:1}} onClick={criarUsuario} disabled={uLoading}>
-              {uLoading?"Criando...":"Criar Acesso"}
+              {uLoading?"Cadastrando...":"Cadastrar Consultor"}
             </button>
           </div>
         </Modal>
@@ -2244,28 +2327,43 @@ export default function App(){
   const[compraItens,setCompraItens]=useState([]);
   const[loadingData,setLoadingData]=useState(false);
   const[sessionChecked,setSessionChecked]=useState(false);
+  const[tokenData,setTokenData]=useState(null);
 
   useEffect(()=>{
-    // Tenta recuperar usuário do sessionStorage primeiro (persiste ao F5)
-    const cachedUser = sessionStorage.getItem('recorrenciaos-user');
+    // Detecta token de convite/reset na URL ANTES de qualquer outra coisa
+    const hash=window.location.hash;
+    if(hash&&hash.includes("access_token")){
+      const params=new URLSearchParams(hash.replace(/^#/,""));
+      const at=params.get("access_token");
+      const rt=params.get("refresh_token");
+      const type=params.get("type");
+      if(at&&(type==="invite"||type==="recovery"||type==="signup")){
+        setTokenData({accessToken:at,refreshToken:rt,type});
+        setSessionChecked(true);
+        return;
+      }
+    }
+
+    // Tenta recuperar usuário do sessionStorage
+    const cachedUser=sessionStorage.getItem('recorrenciaos-user');
     if(cachedUser){
       try{
         setUser(JSON.parse(cachedUser));
         setSessionChecked(true);
-        return; // já tem usuário, não precisa verificar sessão
+        return;
       }catch(e){
         sessionStorage.removeItem('recorrenciaos-user');
       }
     }
 
-    // Se não tem cache, verifica sessão do Supabase
+    // Verifica sessão do Supabase
     supabase.auth.getSession().then(async({data:{session}})=>{
       if(session?.user){
         try{
           const{data:perfil}=await supabase.from("perfis").select("*").eq("id",session.user.id).single();
           const u=perfil?{...session.user,...perfil}:session.user;
           setUser(u);
-          sessionStorage.setItem('recorrenciaos-user', JSON.stringify(u));
+          sessionStorage.setItem('recorrenciaos-user',JSON.stringify(u));
         }catch(e){
           setUser(session.user);
         }
@@ -2320,6 +2418,11 @@ export default function App(){
   useEffect(()=>{loadData();},[loadData]);
 
   if(!sessionChecked)return<Spinner/>;
+
+  if(tokenData){
+    return<DefinirSenha accessToken={tokenData.accessToken} refreshToken={tokenData.refreshToken}/>;
+  }
+
   if(!user)return<Login onLogin={u=>{
     setUser(u);
     sessionStorage.setItem('recorrenciaos-user', JSON.stringify(u));

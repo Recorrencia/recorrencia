@@ -342,7 +342,7 @@ const MeusClientes = ({ clientes, compras, user, setCompras }) => {
           </div>
         </div>
         <div style={{display:"flex",gap:8,flexShrink:0,flexWrap:"wrap"}}>
-          <button style={{...gs.btn(C.blue,C.white)}} onClick={()=>{setModalCompra(detCliente);setCData(new Date().toISOString().split("T")[0]);}}>+ Registrar Venda</button>
+          <button style={{...gs.btn(C.blue,C.white)}} onClick={()=>setModalVenda(detCliente)}>+ Registrar Venda</button>
           <button style={gs.btn()} onClick={()=>setModalObs(detCliente)}>+ Observação</button>
         </div>
       </div>
